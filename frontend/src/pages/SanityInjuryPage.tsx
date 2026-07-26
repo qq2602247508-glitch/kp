@@ -26,9 +26,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "发生未知错误";
 }
 
-function citationLabel(operation: EngineOperation | RuleOperationLog): string {
-  const citation = operation.citation;
+function citationLabel(citation: EngineOperation["citation"]): string {
   return `${citation.filename} · 第 ${citation.page} 页 · ${citation.section}`;
+}
+
+function citationList(operation: EngineOperation | RuleOperationLog): EngineOperation["citation"][] {
+  return operation.citations?.length ? operation.citations : [operation.citation];
 }
 
 export function SanityInjuryPage(): ReactElement {
@@ -350,8 +353,9 @@ export function SanityInjuryPage(): ReactElement {
           {latest ? (
             <div className="citation-card">
               <strong>本次判定引用</strong>
-              <span>{citationLabel(latest)}</span>
-              <small>{latest.citation.citation_id}</small>
+              {citationList(latest).map((citation) => (
+                <span key={citation.citation_id}>{citationLabel(citation)} · {citation.citation_id}</span>
+              ))}
             </div>
           ) : null}
         </article>
@@ -363,7 +367,9 @@ export function SanityInjuryPage(): ReactElement {
               [...logs].reverse().map((entry) => (
                 <div key={entry.operation_id}>
                   <strong>{entry.operation_type}</strong>
-                  <span>{citationLabel(entry)}</span>
+                  {citationList(entry).map((citation) => (
+                    <span key={citation.citation_id}>{citationLabel(citation)} · {citation.citation_id}</span>
+                  ))}
                   <small>{new Date(entry.created_at).toLocaleString()}</small>
                 </div>
               ))

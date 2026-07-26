@@ -1,5 +1,7 @@
 from sqlalchemy import inspect
 
+from coc_kp_assistant.application.rule_engine_service import _citation_items
+
 
 def campaign_payload() -> dict[str, object]:
     return {
@@ -60,12 +62,33 @@ def setup_pair(client: object) -> tuple[str, dict[str, object], dict[str, object
 
 
 def assert_cited(response: dict[str, object]) -> None:
-    citation = response["citation"]
-    assert isinstance(citation, dict)
-    assert citation["source_pack_id"] == "coc7e.core.zh-v1.2.1"
-    assert citation["page"] is not None
-    assert citation["section"]
-    assert citation["citation_id"].startswith("coc7e.core.")
+    citations = response["citations"]
+    assert isinstance(citations, list) and citations
+    for citation in citations:
+        assert citation["source_pack_id"] == "coc7e.core.zh-v1.2.1"
+        assert citation["page"] is not None
+        assert citation["section"]
+        assert citation["edition"] == "7e"
+        assert citation["module"] == "core"
+        assert citation["era"] == []
+        assert citation["checksum"] == (
+            "22f5f56b7a0989cbded695d39c7d5eddddd809cfc9d2c47e4cf4c5d7edea6815"
+        )
+    # Compatibility primary citation always mirrors the first fully-provenanced item.
+    assert response["citation"] == citations[0]
+
+
+def test_legacy_single_citation_data_is_read_as_a_one_item_list() -> None:
+    legacy = {
+        "citation_id": "coc7e.core.sanity-loss-and-insanity",
+        "source_pack_id": "coc7e.core.zh-v1.2.1",
+        "filename": "COC7th核心规则书v1.2.1.pdf",
+        "page": 367,
+        "section": "第十六章附录／理智规则摘要",
+    }
+    assert [item.citation_id for item in _citation_items(legacy)] == [
+        "0d626519-a343-5a71-998c-9b0b56f76232"
+    ]
 
 
 def create_case_session(client: object, campaign_id: str) -> str:
@@ -142,7 +165,7 @@ def test_sanity_loss_is_deterministic_versioned_cited_and_logged(client) -> None
     assert logs.status_code == 200
     sanity_logs = [entry for entry in logs.json() if entry["operation_type"] == "sanity_loss"]
     assert len(sanity_logs) == 2
-    assert sanity_logs[-1]["citation"]["citation_id"] == second_result["citation"]["citation_id"]
+    assert sanity_logs[-1]["citations"] == second_result["citations"]
 
 
 def test_injury_recovery_and_combat_use_native_weapon_policy(client) -> None:
@@ -153,7 +176,10 @@ def test_injury_recovery_and_combat_use_native_weapon_policy(client) -> None:
     weapons = client.get("/api/v1/rule-engines/weapons")
     assert weapons.status_code == 200
     assert {item["weapon_key"] for item in weapons.json()} >= {"unarmed", "handgun_38"}
-    assert all(item["citation"]["source_pack_id"].startswith("coc7e.") for item in weapons.json())
+    assert all(
+        item["citations"] and item["citation"] == item["citations"][0]
+        for item in weapons.json()
+    )
 
     injury = client.post(
         f"/api/v1/campaigns/{campaign_id}/investigators/{target_id}/injury",
@@ -228,6 +254,10 @@ def test_injury_recovery_and_combat_use_native_weapon_policy(client) -> None:
     combat_result = combat.json()
     assert combat_result["hit"] is True
     assert combat_result["damage_applied"] == 3
+    assert [item["citation_id"] for item in combat_result["citations"]] == [
+        "69bcc3eb-67af-5d76-8e42-005fbbfc8358",
+        "2ce1026d-07ef-5146-a22a-58cf4f9f9c17",
+    ]
     assert combat_result["target"]["hit_points"] == 3
     assert_cited(combat_result)
 
@@ -441,3 +471,12 @@ def test_chase_hazard_roll_is_bound_and_escape_completes(client) -> None:
     )
     assert escaped.status_code == 200, escaped.text
     assert escaped.json()["status"] == "escaped"
+    assert [item["citation_id"] for item in escaped.json()["citations"]] == [
+        "b5ac21aa-0b22-50a2-848d-ba61e674c993",
+        "eeb778d6-5e69-5af7-9f38-511c5f4827a7",
+        "2b7817b9-a2da-5ba9-8315-c10421bca87d",
+        "28bb7282-3718-5ddc-b91a-3e5eca7bca05",
+    ]
+    logs = client.get(f"/api/v1/campaigns/{campaign_id}/rule-operations").json()
+    hazard_log = next(item for item in logs if item["operation_type"] == "chase_advanced")
+    assert hazard_log["citations"] == escaped.json()["citations"]

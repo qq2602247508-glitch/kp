@@ -223,6 +223,10 @@ export type EngineCitation = {
   filename: string;
   page: number;
   section: string;
+  edition: string;
+  module: string;
+  era: string[];
+  checksum: string;
 };
 
 export type EngineOperation = {
@@ -231,6 +235,7 @@ export type EngineOperation = {
   investigator: Investigator;
   target: Investigator | null;
   citation: EngineCitation;
+  citations: EngineCitation[];
   loss: number | null;
   session_sanity_loss: number | null;
   reason: string | null;
@@ -254,6 +259,7 @@ export type RuleOperationLog = {
   input_data: Record<string, unknown>;
   output_data: Record<string, unknown>;
   citation: EngineCitation;
+  citations: EngineCitation[];
   created_at: string;
 };
 
@@ -265,6 +271,7 @@ export type WeaponPolicy = {
   skill_key: string;
   uses_damage_bonus: boolean;
   citation: EngineCitation;
+  citations: EngineCitation[];
 };
 
 export type ChaseParticipant = {
@@ -288,6 +295,7 @@ export type Chase = {
   track_length: number;
   version: number;
   citation: EngineCitation;
+  citations: EngineCitation[];
   created_at: string;
   updated_at: string;
 };

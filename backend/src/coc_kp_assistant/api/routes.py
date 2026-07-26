@@ -419,6 +419,10 @@ def list_weapons() -> list[WeaponPolicyResponse]:
             skill_key=weapon.skill_key,
             uses_damage_bonus=weapon.uses_damage_bonus,
             citation=EngineCitationResponse.model_validate(weapon.citation.as_dict()),
+            citations=tuple(
+                EngineCitationResponse.model_validate(citation.as_dict())
+                for citation in weapon.citations
+            ),
         )
         for weapon in WEAPONS
     ]

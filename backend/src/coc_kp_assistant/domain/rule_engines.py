@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 CORE_PACK_ID = "coc7e.core.zh-v1.2.1"
 CORE_FILENAME = "COC7th核心规则书v1.2.1.pdf"
+CORE_CHECKSUM = "22f5f56b7a0989cbded695d39c7d5eddddd809cfc9d2c47e4cf4c5d7edea6815"
 
 
 @dataclass(frozen=True)
@@ -11,73 +12,101 @@ class EngineCitation:
     filename: str
     page: int
     section: str
+    edition: str = "7e"
+    module: str = "core"
+    era: tuple[str, ...] = ()
+    checksum: str = CORE_CHECKSUM
 
-    def as_dict(self) -> dict[str, str | int]:
+    def as_dict(self) -> dict[str, str | int | list[str]]:
         return {
             "citation_id": self.citation_id,
             "source_pack_id": self.source_pack_id,
             "filename": self.filename,
             "page": self.page,
             "section": self.section,
+            "edition": self.edition,
+            "module": self.module,
+            "era": list(self.era),
+            "checksum": self.checksum,
         }
 
 
 SANITY_CITATION = EngineCitation(
-    citation_id="coc7e.core.sanity-loss-and-insanity",
+    citation_id="0d626519-a343-5a71-998c-9b0b56f76232",
     source_pack_id=CORE_PACK_ID,
     filename=CORE_FILENAME,
     page=367,
-    section="第十六章附录／理智规则摘要",
+    section="第十六章附录/理智规则摘要",
 )
 INJURY_CITATION = EngineCitation(
-    citation_id="coc7e.core.damage-major-wounds-and-dying",
+    citation_id="898d81fc-963c-5473-9f7c-4d99e65d4d4b",
     source_pack_id=CORE_PACK_ID,
     filename=CORE_FILENAME,
     page=103,
-    section="第六章战斗／伤害、重伤、昏迷与濒死",
+    section="第六章战斗/昏迷重伤濒死",
 )
 RECOVERY_CITATION = EngineCitation(
-    citation_id="coc7e.core.healing-and-recovery",
+    citation_id="0e24f8d1-eacb-54b6-b784-6aa1db5421f4",
     source_pack_id=CORE_PACK_ID,
     filename=CORE_FILENAME,
     page=104,
-    section="第六章战斗／急救、医学与恢复",
+    section="重伤恢复",
+)
+RECOVERY_CONTEXT_CITATION = EngineCitation(
+    citation_id="b87f9a5c-fd66-5cf8-b681-86677258aabe",
+    source_pack_id=CORE_PACK_ID,
+    filename=CORE_FILENAME,
+    page=104,
+    section="急救与医学",
 )
 COMBAT_CITATION = EngineCitation(
-    citation_id="coc7e.core.combat-and-damage",
+    citation_id="69bcc3eb-67af-5d76-8e42-005fbbfc8358",
     source_pack_id=CORE_PACK_ID,
     filename=CORE_FILENAME,
     page=89,
-    section="第六章战斗／格斗攻击与伤害",
+    section="武器战斗示例",
 )
 MELEE_WEAPON_CITATION = EngineCitation(
-    citation_id="coc7e.core.weapon-table-melee",
+    citation_id="2ce1026d-07ef-5146-a22a-58cf4f9f9c17",
     source_pack_id=CORE_PACK_ID,
     filename=CORE_FILENAME,
     page=352,
-    section="第十六章附录／武器表（格斗武器）",
+    section="武器表（近战）",
 )
 HANDGUN_WEAPON_CITATION = EngineCitation(
-    citation_id="coc7e.core.weapon-table-handguns",
+    citation_id="3ea627e3-523b-5567-8460-3c33b84cdc9e",
     source_pack_id=CORE_PACK_ID,
     filename=CORE_FILENAME,
     page=353,
-    section="第十六章附录／武器表（手枪）",
+    section="武器表（手枪）",
 )
 SHOTGUN_WEAPON_CITATION = EngineCitation(
-    citation_id="coc7e.core.weapon-table-shotguns",
+    citation_id="80b6fe46-fdf9-50b5-8227-73b7756f293a",
     source_pack_id=CORE_PACK_ID,
     filename=CORE_FILENAME,
     page=354,
-    section="第十六章附录／武器表（霰弹枪）",
+    section="武器表（霰弹枪）",
 )
-CHASE_CITATION = EngineCitation(
-    citation_id="coc7e.core.chases-movement-actions",
+CHASE_MOV_CITATION = EngineCitation(
+    citation_id="b5ac21aa-0b22-50a2-848d-ba61e674c993",
     source_pack_id=CORE_PACK_ID,
     filename=CORE_FILENAME,
-    page=119,
-    section="第七章追逐／移动行动",
+    page=116,
+    section="追逐中的MOV与行动点",
 )
+CHASE_ACTIONS_CITATION = EngineCitation(
+    citation_id="eeb778d6-5e69-5af7-9f38-511c5f4827a7",
+    source_pack_id=CORE_PACK_ID, filename=CORE_FILENAME, page=117, section="追逐行动",
+)
+CHASE_HAZARDS_CITATION = EngineCitation(
+    citation_id="2b7817b9-a2da-5ba9-8315-c10421bca87d",
+    source_pack_id=CORE_PACK_ID, filename=CORE_FILENAME, page=118, section="追逐危害",
+)
+CHASE_BARRIERS_CITATION = EngineCitation(
+    citation_id="28bb7282-3718-5ddc-b91a-3e5eca7bca05",
+    source_pack_id=CORE_PACK_ID, filename=CORE_FILENAME, page=119, section="追逐障碍",
+)
+CHASE_CITATIONS = (CHASE_MOV_CITATION, CHASE_ACTIONS_CITATION)
 
 
 @dataclass(frozen=True)
@@ -88,7 +117,11 @@ class WeaponPolicy:
     maximum_rolled_damage: int
     skill_key: str
     uses_damage_bonus: bool
-    citation: EngineCitation
+    citations: tuple[EngineCitation, ...]
+
+    @property
+    def citation(self) -> EngineCitation:
+        return self.citations[0]
 
 
 WEAPONS: tuple[WeaponPolicy, ...] = (
@@ -99,7 +132,7 @@ WEAPONS: tuple[WeaponPolicy, ...] = (
         3,
         "fighting_brawl",
         True,
-        MELEE_WEAPON_CITATION,
+        (MELEE_WEAPON_CITATION,),
     ),
     WeaponPolicy(
         "knife_small",
@@ -108,7 +141,7 @@ WEAPONS: tuple[WeaponPolicy, ...] = (
         4,
         "fighting_brawl",
         True,
-        MELEE_WEAPON_CITATION,
+        (MELEE_WEAPON_CITATION,),
     ),
     WeaponPolicy(
         "club",
@@ -117,7 +150,7 @@ WEAPONS: tuple[WeaponPolicy, ...] = (
         6,
         "fighting_brawl",
         True,
-        MELEE_WEAPON_CITATION,
+        (MELEE_WEAPON_CITATION,),
     ),
     WeaponPolicy(
         "handgun_38",
@@ -126,7 +159,7 @@ WEAPONS: tuple[WeaponPolicy, ...] = (
         10,
         "firearms_handgun",
         False,
-        HANDGUN_WEAPON_CITATION,
+        (HANDGUN_WEAPON_CITATION,),
     ),
     WeaponPolicy(
         "shotgun_12g",
@@ -135,7 +168,7 @@ WEAPONS: tuple[WeaponPolicy, ...] = (
         24,
         "firearms_rifle_shotgun",
         False,
-        SHOTGUN_WEAPON_CITATION,
+        (SHOTGUN_WEAPON_CITATION,),
     ),
 )
 WEAPON_BY_KEY = {weapon.weapon_key: weapon for weapon in WEAPONS}

@@ -178,6 +178,10 @@ class EngineCitationResponse(DomainModel):
     filename: str
     page: int
     section: str
+    edition: str
+    module: str
+    era: tuple[str, ...]
+    checksum: str
 
 
 class SanityLossRequest(DomainModel):
@@ -232,6 +236,7 @@ class EngineOperationResponse(DomainModel):
     investigator: InvestigatorResponse
     target: InvestigatorResponse | None = None
     citation: EngineCitationResponse
+    citations: tuple[EngineCitationResponse, ...]
     loss: int | None = None
     sanity_before: int | None = None
     session_sanity_loss: int | None = None
@@ -254,6 +259,7 @@ class WeaponPolicyResponse(DomainModel):
     skill_key: str
     uses_damage_bonus: bool
     citation: EngineCitationResponse
+    citations: tuple[EngineCitationResponse, ...]
 
 
 class ChaseParticipant(DomainModel):
@@ -316,6 +322,7 @@ class ChaseResponse(DomainModel):
     track_length: int
     version: int
     citation: EngineCitationResponse
+    citations: tuple[EngineCitationResponse, ...]
     created_at: datetime
     updated_at: datetime
 
@@ -330,4 +337,5 @@ class RuleOperationLogResponse(DomainModel):
     input_data: dict[str, Any]
     output_data: dict[str, Any]
     citation: EngineCitationResponse
+    citations: tuple[EngineCitationResponse, ...]
     created_at: datetime

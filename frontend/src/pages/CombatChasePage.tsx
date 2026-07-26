@@ -29,6 +29,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "发生未知错误";
 }
 
+function citationList(item: Pick<Chase | RuleOperationLog, "citation" | "citations">) {
+  return item.citations?.length ? item.citations : [item.citation];
+}
+
 export function CombatChasePage(): ReactElement {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campaignId, setCampaignId] = useState("");
@@ -358,10 +362,11 @@ export function CombatChasePage(): ReactElement {
                 {chaseAction === "hazard" ? <label className="field"><span>障碍技能</span><input value={hazardSkillKey} onChange={(event) => setHazardSkillKey(event.target.value)} /></label> : null}
                 <button className="secondary-button" disabled={busy || !actingParticipantId} onClick={() => void handleAdvance()} type="button">执行一项行动</button>
               </div> : null}
-              <small>
-                {activeChase.citation.filename} · 第 {activeChase.citation.page} 页 ·{" "}
-                {activeChase.citation.section}
-              </small>
+              {citationList(activeChase).map((citation) => (
+                <small key={citation.citation_id}>
+                  {citation.filename} · 第 {citation.page} 页 · {citation.section} · {citation.citation_id}
+                </small>
+              ))}
             </div>
           ) : (
             <p>尚未建立追逐。</p>
@@ -377,10 +382,11 @@ export function CombatChasePage(): ReactElement {
             .map((entry) => (
               <div key={entry.operation_id}>
                 <strong>{entry.operation_type}</strong>
-                <span>
-                  {entry.citation.filename} · 第 {entry.citation.page} 页 ·{" "}
-                  {entry.citation.section}
-                </span>
+                {citationList(entry).map((citation) => (
+                  <span key={citation.citation_id}>
+                    {citation.filename} · 第 {citation.page} 页 · {citation.section} · {citation.citation_id}
+                  </span>
+                ))}
               </div>
             ))}
         </div>

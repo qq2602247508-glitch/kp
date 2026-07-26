@@ -21,10 +21,14 @@ from coc_kp_assistant.api.schemas import (
 )
 from coc_kp_assistant.application import service
 from coc_kp_assistant.domain.rule_engines import (
-    CHASE_CITATION,
+    CHASE_BARRIERS_CITATION,
+    CHASE_CITATIONS,
+    CHASE_HAZARDS_CITATION,
     COMBAT_CITATION,
+    CORE_CHECKSUM,
     INJURY_CITATION,
     RECOVERY_CITATION,
+    RECOVERY_CONTEXT_CITATION,
     SANITY_CITATION,
     WEAPON_BY_KEY,
     injury_state,
@@ -45,16 +49,58 @@ class InvalidRuleOperationError(Exception):
     pass
 
 
+def _citation_items(data: dict[str, Any]) -> tuple[EngineCitationResponse, ...]:
+    """Read current {items: [...]} storage and pre-list legacy citation records."""
+    raw_items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(raw_items, list):
+        legacy_id = data.get("citation_id")
+        legacy_by_id = {
+            "coc7e.core.sanity-loss-and-insanity": (SANITY_CITATION,),
+            "coc7e.core.damage-major-wounds-and-dying": (INJURY_CITATION,),
+            "coc7e.core.healing-and-recovery": (
+                RECOVERY_CITATION,
+                RECOVERY_CONTEXT_CITATION,
+            ),
+            "coc7e.core.combat-and-damage": (COMBAT_CITATION,),
+            "coc7e.core.chases-movement-actions": CHASE_CITATIONS,
+        }
+        legacy = legacy_by_id.get(legacy_id) if isinstance(legacy_id, str) else None
+        if legacy is not None:
+            return tuple(
+                EngineCitationResponse.model_validate(citation.as_dict())
+                for citation in legacy
+            )
+        raw_items = [data]
+    return tuple(
+        EngineCitationResponse.model_validate(
+            {
+                "edition": "7e",
+                "module": "core",
+                "era": [],
+                "checksum": CORE_CHECKSUM,
+                **item,
+            }
+        )
+        for item in raw_items
+    )
+
+
+def _citation_data(*citations: Any) -> dict[str, list[dict[str, Any]]]:
+    return {"items": [citation.as_dict() for citation in citations]}
+
+
 def _operation_response(
     record: RuleOperationRecord, investigator: InvestigatorRecord
 ) -> EngineOperationResponse:
     response = service._investigator_response(investigator)
+    citations = _citation_items(record.citation_data)
     return EngineOperationResponse(
         operation_id=UUID(record.id),
         operation_type=record.operation_type,
         investigator=response,
         target=response if record.operation_type == "combat" else None,
-        citation=EngineCitationResponse.model_validate(record.citation_data),
+        citations=citations,
+        citation=citations[0],
         created_at=record.created_at,
         **record.output_data,
     )
@@ -70,7 +116,7 @@ def _add_operation(
     session_key: str | None,
     input_data: dict[str, Any],
     output_data: dict[str, Any],
-    citation: dict[str, Any],
+    citations: tuple[Any, ...],
 ) -> RuleOperationRecord:
     record = RuleOperationRecord(
         campaign_id=str(campaign_id),
@@ -80,7 +126,7 @@ def _add_operation(
         operation_type=operation_type,
         input_data=input_data,
         output_data=output_data,
-        citation_data=citation,
+        citation_data=_citation_data(*citations),
     )
     session.add(record)
     session.flush()
@@ -234,7 +280,7 @@ def apply_sanity_loss(
         session_key=payload.session_key,
         input_data=payload.model_dump(mode="json"),
         output_data=output,
-        citation=SANITY_CITATION.as_dict(),
+        citations=(SANITY_CITATION,),
     )
     session.flush()
     service._audit(
@@ -280,7 +326,7 @@ def apply_injury(
         session_key=payload.session_key,
         input_data=payload.model_dump(mode="json"),
         output_data=output,
-        citation=INJURY_CITATION.as_dict(),
+        citations=(INJURY_CITATION,),
     )
     output["injury_id"] = operation.id
     operation.output_data = output
@@ -395,7 +441,7 @@ def apply_recovery(
         session_key=payload.session_key,
         input_data=payload.model_dump(mode="json"),
         output_data=output,
-        citation=RECOVERY_CITATION.as_dict(),
+        citations=(RECOVERY_CITATION, RECOVERY_CONTEXT_CITATION),
     )
     session.flush()
     service._audit(
@@ -474,7 +520,7 @@ def resolve_combat(
         session_key=payload.session_key,
         input_data=payload.model_dump(mode="json"),
         output_data=output,
-        citation=COMBAT_CITATION.as_dict(),
+        citations=(COMBAT_CITATION, *weapon.citations),
     )
     session.flush()
     service._audit(
@@ -509,7 +555,11 @@ def _chase_response(record: ChaseRecord) -> ChaseResponse:
         escape_distance=record.escape_distance,
         track_length=record.track_length,
         version=record.version,
-        citation=EngineCitationResponse.model_validate(CHASE_CITATION.as_dict()),
+        citations=tuple(
+            EngineCitationResponse.model_validate(item.as_dict())
+            for item in CHASE_CITATIONS
+        ),
+        citation=EngineCitationResponse.model_validate(CHASE_CITATIONS[0].as_dict()),
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
@@ -571,7 +621,7 @@ def create_chase(session: Session, campaign_id: UUID, payload: ChaseCreateReques
         session_key=payload.session_key,
         input_data=payload.model_dump(mode="json"),
         output_data={"version": record.version, "participants": record.participants, "round": 1},
-        citation=CHASE_CITATION.as_dict(),
+        citations=CHASE_CITATIONS,
     )
     service._audit(
         session,
@@ -679,6 +729,17 @@ def advance_chase(
     record = session.scalar(select(ChaseRecord).where(ChaseRecord.id == str(chase_id)))
     assert record is not None
     response = _chase_response(record)
+    if action.action == "hazard":
+        citations = (*CHASE_CITATIONS, CHASE_HAZARDS_CITATION, CHASE_BARRIERS_CITATION)
+        response = response.model_copy(
+            update={
+                "citations": tuple(
+                    EngineCitationResponse.model_validate(citation.as_dict())
+                    for citation in citations
+                ),
+                "citation": EngineCitationResponse.model_validate(citations[0].as_dict()),
+            }
+        )
     _add_operation(
         session,
         campaign_id=campaign_id,
@@ -694,7 +755,14 @@ def advance_chase(
             "status": record.status,
             "succeeded": succeeded,
         },
-        citation=CHASE_CITATION.as_dict(),
+        citations=(
+            *CHASE_CITATIONS,
+            *(
+                (CHASE_HAZARDS_CITATION, CHASE_BARRIERS_CITATION)
+                if action.action == "hazard"
+                else ()
+            ),
+        ),
     )
     service._audit(
         session,
@@ -722,8 +790,9 @@ def list_operations(session: Session, campaign_id: UUID) -> list[RuleOperationLo
         .order_by(RuleOperationRecord.created_at, RuleOperationRecord.id)
         .limit(500)
     ).all()
-    return [
-        RuleOperationLogResponse(
+    def response_for(record: RuleOperationRecord) -> RuleOperationLogResponse:
+        citations = _citation_items(record.citation_data)
+        return RuleOperationLogResponse(
             operation_id=UUID(record.id),
             campaign_id=UUID(record.campaign_id),
             subject_id=UUID(record.subject_id),
@@ -732,8 +801,9 @@ def list_operations(session: Session, campaign_id: UUID) -> list[RuleOperationLo
             operation_type=record.operation_type,
             input_data=record.input_data,
             output_data=record.output_data,
-            citation=EngineCitationResponse.model_validate(record.citation_data),
+            citations=citations,
+            citation=citations[0],
             created_at=record.created_at,
         )
-        for record in records
-    ]
+
+    return [response_for(record) for record in records]
