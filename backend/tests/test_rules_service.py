@@ -10,7 +10,7 @@ from coc_kp_assistant.rag import (
     SearchOptions,
 )
 from coc_kp_assistant.rules import (
-    GroundedAnswerError,
+    GroundedAnswerUnavailableError,
     GroundedDraft,
     OllamaGroundedAnswerProvider,
     RuleQuery,
@@ -224,7 +224,7 @@ def test_ollama_answer_adapter_uses_installed_model_and_marks_evidence_untrusted
     assert all("pull" not in key.lower() for key in requests[0])
 
 
-def test_ollama_answer_timeout_becomes_a_bounded_grounded_answer_error() -> None:
+def test_ollama_answer_timeout_is_reported_as_provider_unavailable() -> None:
     def timeout(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("local model timed out", request=request)
 
@@ -236,5 +236,8 @@ def test_ollama_answer_timeout_becomes_a_bounded_grounded_answer_error() -> None
         answer_provider=None,
     ).search(RuleQuery(query="问题"))
 
-    with pytest.raises(GroundedAnswerError, match="local grounded answer request failed"):
+    with pytest.raises(
+        GroundedAnswerUnavailableError,
+        match="local grounded answer provider is unavailable",
+    ):
         provider.generate("问题", evidence)

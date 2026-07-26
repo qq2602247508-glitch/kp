@@ -91,6 +91,14 @@ class GroundedAnswerError(RuntimeError):
     pass
 
 
+class GroundedAnswerUnavailableError(GroundedAnswerError):
+    pass
+
+
+class GroundedAnswerInvalidOutputError(GroundedAnswerError):
+    pass
+
+
 class OllamaGroundedAnswerProvider:
     model_name = ANSWER_MODEL
 
@@ -160,10 +168,17 @@ class OllamaGroundedAnswerProvider:
                 },
             )
             response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise GroundedAnswerUnavailableError(
+                "local grounded answer provider is unavailable"
+            ) from error
+        try:
             payload = response.json()
             draft = self._parse_response(payload)
-        except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
-            raise GroundedAnswerError("local grounded answer request failed") from error
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+            raise GroundedAnswerInvalidOutputError(
+                "local grounded answer output is invalid"
+            ) from error
         return draft
 
     @staticmethod
@@ -244,7 +259,7 @@ class RulesService:
             return _abstain("insufficient_evidence")
         try:
             draft = self._answer_provider.generate(query.query, evidence)
-        except GroundedAnswerError:
+        except GroundedAnswerInvalidOutputError:
             return _abstain("invalid_model_output")
         if draft.status == "abstain":
             return _abstain("insufficient_evidence")

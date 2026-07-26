@@ -1,6 +1,11 @@
 from fastapi.testclient import TestClient
 
-from coc_kp_assistant.rules import RuleAnswer, RuleCitation, RuleQuery
+from coc_kp_assistant.rules import (
+    GroundedAnswerUnavailableError,
+    RuleAnswer,
+    RuleCitation,
+    RuleQuery,
+)
 
 
 def _citation() -> RuleCitation:
@@ -93,3 +98,19 @@ def test_rules_answer_api_returns_validated_citations(client: TestClient) -> Non
     assert body["abstained"] is False
     assert body["citations"][0]["citation_id"] == "chunk-1"
     assert service.answer_queries[0].query == "困难成功如何判定？"
+
+
+def test_rules_answer_api_reports_local_model_unavailable(client: TestClient) -> None:
+    class UnavailableRulesService(StubRulesService):
+        def answer(self, query: RuleQuery) -> RuleAnswer:
+            raise GroundedAnswerUnavailableError("local model timed out")
+
+    client.app.state.rules_service = UnavailableRulesService()
+
+    response = client.post(
+        "/api/v1/rules/answer",
+        json={"question": "困难成功如何判定？"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "本地 qwen3:30b-instruct 模型不可用或响应超时"

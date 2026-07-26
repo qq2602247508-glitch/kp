@@ -86,4 +86,31 @@ describe("Rules workspace", () => {
 
     expect(await screen.findByText("现有资料不足，无法给出有引用的回答。")).toBeInTheDocument();
   });
+
+  it("shows local model unavailability instead of calling it insufficient evidence", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+        json: async () => ({
+          detail: "本地 qwen3:30b-instruct 模型不可用或响应超时",
+        }),
+      }),
+    );
+    render(<RulesPage />);
+
+    fireEvent.change(screen.getByLabelText("规则问题"), {
+      target: { value: "困难成功如何判定？" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "依据资料回答" }));
+
+    expect(
+      await screen.findByText("本地 qwen3:30b-instruct 模型不可用或响应超时"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("现有资料不足，无法给出有引用的回答。"),
+    ).not.toBeInTheDocument();
+  });
 });

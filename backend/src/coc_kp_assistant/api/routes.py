@@ -32,7 +32,12 @@ from coc_kp_assistant.domain.case_state import (
 from coc_kp_assistant.domain.investigators import InvestigatorCreate
 from coc_kp_assistant.infrastructure.database import session_dependency
 from coc_kp_assistant.rag import IndexCompatibilityError, IndexIncompleteError
-from coc_kp_assistant.rules import RuleQuery, RulesService, create_rules_service
+from coc_kp_assistant.rules import (
+    GroundedAnswerUnavailableError,
+    RuleQuery,
+    RulesService,
+    create_rules_service,
+)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -388,6 +393,11 @@ def answer_rules(
     )
     try:
         answer = rules_service.answer(query)
+    except GroundedAnswerUnavailableError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="本地 qwen3:30b-instruct 模型不可用或响应超时",
+        ) from error
     except (IndexCompatibilityError, IndexIncompleteError) as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
