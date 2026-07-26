@@ -328,6 +328,13 @@ export type EngineOperation = {
   hit: boolean | null;
   weapon_key: string | null;
   attack_roll_id: string | null;
+  skill_key?: string | null;
+  skill_name?: string | null;
+  improvement_roll?: number | null;
+  increase_roll?: number | null;
+  improved?: boolean | null;
+  previous_skill_value?: number | null;
+  current_skill_value?: number | null;
   created_at: string;
 };
 

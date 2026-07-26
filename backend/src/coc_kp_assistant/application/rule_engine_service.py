@@ -19,6 +19,7 @@ from coc_kp_assistant.api.schemas import (
     RecoveryRequest,
     RuleOperationLogResponse,
     SanityLossRequest,
+    SkillImprovementRequest,
 )
 from coc_kp_assistant.application import service
 from coc_kp_assistant.domain.rule_engines import (
@@ -31,16 +32,19 @@ from coc_kp_assistant.domain.rule_engines import (
     RECOVERY_CITATION,
     RECOVERY_CONTEXT_CITATION,
     SANITY_CITATION,
+    SKILL_IMPROVEMENT_CITATION,
     WEAPON_BY_KEY,
     injury_state,
     recovery_amount,
     sanity_conditions,
+    skill_improvement,
 )
 from coc_kp_assistant.infrastructure.models import (
     CampaignRecord,
     CaseSessionRecord,
     ChaseRecord,
     InvestigatorRecord,
+    InvestigatorSkillRecord,
     RollRecord,
     RuleOperationRecord,
 )
@@ -811,6 +815,80 @@ def resolve_combat(
         after=service._investigator_response(target).model_dump(mode="json"),
     )
     response = _operation_response(operation, target)
+    session.commit()
+    return response
+
+
+def apply_skill_improvement(
+    session: Session,
+    campaign_id: UUID,
+    investigator_id: UUID,
+    payload: SkillImprovementRequest,
+) -> EngineOperationResponse:
+    if payload.case_session_id is not None:
+        _validate_case_session(session, campaign_id, payload.case_session_id)
+    record, before = _claim_investigator(
+        session, campaign_id, investigator_id, payload.expected_version
+    )
+    skill = session.scalar(
+        select(InvestigatorSkillRecord).where(
+            InvestigatorSkillRecord.investigator_id == record.id,
+            InvestigatorSkillRecord.skill_key == payload.skill_key,
+            InvestigatorSkillRecord.specialization_key == (payload.specialization or ""),
+        )
+    )
+    if skill is None:
+        raise InvalidRuleOperationError("investigator does not have the selected skill")
+    if payload.skill_key in {"credit_rating", "cthulhu_mythos", "mythos"}:
+        raise InvalidRuleOperationError(
+            "credit rating and Cthulhu Mythos cannot receive improvement marks"
+        )
+    if not skill.improvement_mark:
+        raise InvalidRuleOperationError("skill does not have an improvement mark")
+    try:
+        next_value, improved, increase = skill_improvement(
+            current_value=skill.current_value,
+            improvement_roll=payload.improvement_roll,
+            increase_roll=payload.increase_roll,
+        )
+    except ValueError as error:
+        raise InvalidRuleOperationError(str(error)) from error
+    previous_value = skill.current_value
+    skill.current_value = next_value
+    # A marked skill receives one check per development phase, success or failure.
+    skill.improvement_mark = False
+    output = {
+        "skill_key": skill.skill_key,
+        "skill_name": skill.display_name,
+        "improvement_roll": payload.improvement_roll,
+        "increase_roll": increase if improved else None,
+        "improved": improved,
+        "previous_skill_value": previous_value,
+        "current_skill_value": next_value,
+    }
+    operation = _add_operation(
+        session,
+        campaign_id=campaign_id,
+        operation_type="skill_improvement",
+        subject_id=record.id,
+        case_session_id=payload.case_session_id,
+        session_key=payload.session_key,
+        input_data=payload.model_dump(mode="json"),
+        output_data=output,
+        citations=(SKILL_IMPROVEMENT_CITATION,),
+    )
+    session.flush()
+    service._audit(
+        session,
+        campaign_id=record.campaign_id,
+        action="skill_improvement",
+        entity_type="investigator",
+        entity_id=record.id,
+        expected_version=payload.expected_version,
+        before=before,
+        after=service._investigator_response(record).model_dump(mode="json"),
+    )
+    response = _operation_response(operation, record)
     session.commit()
     return response
 

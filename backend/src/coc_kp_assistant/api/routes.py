@@ -32,6 +32,7 @@ from coc_kp_assistant.api.schemas import (
     RuleOperationLogResponse,
     RuleSearchResponse,
     SanityLossRequest,
+    SkillImprovementRequest,
     SkillsReplace,
     SourcePackSelectionReplace,
     WeaponPolicyResponse,
@@ -581,6 +582,28 @@ def resolve_combat(
 ) -> EngineOperationResponse:
     try:
         return rule_engine_service.resolve_combat(session, campaign_id, payload)
+    except (
+        service.EntityNotFoundError,
+        service.VersionConflictError,
+        rule_engine_service.InvalidRuleOperationError,
+    ) as error:
+        raise _rule_engine_error(error) from error
+
+
+@router.post(
+    "/campaigns/{campaign_id}/investigators/{investigator_id}/skill-improvement",
+    response_model=EngineOperationResponse,
+)
+def apply_skill_improvement(
+    campaign_id: UUID,
+    investigator_id: UUID,
+    payload: SkillImprovementRequest,
+    session: DatabaseSession,
+) -> EngineOperationResponse:
+    try:
+        return rule_engine_service.apply_skill_improvement(
+            session, campaign_id, investigator_id, payload
+        )
     except (
         service.EntityNotFoundError,
         service.VersionConflictError,

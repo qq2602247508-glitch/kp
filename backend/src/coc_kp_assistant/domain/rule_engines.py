@@ -66,6 +66,13 @@ COMBAT_CITATION = EngineCitation(
     page=89,
     section="武器战斗示例",
 )
+SKILL_IMPROVEMENT_CITATION = EngineCitation(
+    citation_id="8a7eeb90-2d50-5cc8-a5d2-dba85ca6b3dc",
+    source_pack_id=CORE_PACK_ID,
+    filename=CORE_FILENAME,
+    page=79,
+    section="第五章游戏系统/经验奖励：幕间成长",
+)
 MELEE_WEAPON_CITATION = EngineCitation(
     citation_id="2ce1026d-07ef-5146-a22a-58cf4f9f9c17",
     source_pack_id=CORE_PACK_ID,
@@ -217,3 +224,21 @@ def recovery_amount(care_type: str, healing_roll: int | None) -> int:
             raise ValueError("medicine and natural recovery require a 1-3 healing roll")
         return healing_roll
     raise ValueError("unsupported care type")
+
+
+def skill_improvement(
+    *, current_value: int, improvement_roll: int, increase_roll: int | None
+) -> tuple[int, bool, int]:
+    """Resolve one marked COC7 skill check with caller-supplied dice."""
+    if not 0 <= current_value <= 999:
+        raise ValueError("current skill value must be between 0 and 999")
+    if not 1 <= improvement_roll <= 100:
+        raise ValueError("improvement roll must be between 1 and 100")
+    improved = improvement_roll > current_value or improvement_roll > 95
+    if improved:
+        if increase_roll is None or not 1 <= increase_roll <= 10:
+            raise ValueError("a successful improvement check requires a 1D10 result")
+        return current_value + increase_roll, True, increase_roll
+    if increase_roll is not None:
+        raise ValueError("a failed improvement check must not include a 1D10 result")
+    return current_value, False, 0

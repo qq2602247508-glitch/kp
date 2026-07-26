@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from "re
 
 import {
   ApiError,
+  applySkillImprovement,
   createCampaign,
   createInvestigator,
   listCampaigns,
@@ -242,6 +243,9 @@ export function InvestigatorPage(): ReactElement {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [growthSkillKey, setGrowthSkillKey] = useState("");
+  const [growthRoll, setGrowthRoll] = useState(100);
+  const [growthIncrease, setGrowthIncrease] = useState(1);
 
   const loadCampaigns = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -380,6 +384,41 @@ export function InvestigatorPage(): ReactElement {
     }
   }
 
+  async function handleSkillImprovement(): Promise<void> {
+    if (!campaignId || !editor.investigator_id || !editor.version || !growthSkillKey) {
+      setFailure("请先保存调查员，并选择一项带成长标记的技能。");
+      return;
+    }
+    const selectedSkill = editor.profile.skills.find((item) => item.skill_key === growthSkillKey);
+    if (!selectedSkill?.improvement_mark) {
+      setFailure("只有带成长标记的技能可以进行幕间改善检定。");
+      return;
+    }
+    const improved = growthRoll > selectedSkill.current_value || growthRoll > 95;
+    setSaving(true);
+    setFailure(null);
+    try {
+      const result = await applySkillImprovement(campaignId, editor.investigator_id, {
+        expected_version: editor.version,
+        skill_key: selectedSkill.skill_key,
+        specialization: selectedSkill.specialization ?? undefined,
+        improvement_roll: growthRoll,
+        increase_roll: improved ? growthIncrease : undefined,
+      });
+      const saved = result.investigator;
+      setInvestigators((items) => items.map((item) => item.investigator_id === saved.investigator_id ? saved : item));
+      setEditor(createEditor(saved));
+      setGrowthSkillKey("");
+      setNotice(result.improved
+        ? `${result.skill_name}改善成功：${result.previous_skill_value} → ${result.current_skill_value}。`
+        : `${result.skill_name}本次未改善；成长标记已清除。`);
+    } catch (error) {
+      setFailure(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function patchProfile(patch: Partial<InvestigatorProfile>): void {
     setEditor((current) => ({
       ...current,
@@ -502,6 +541,19 @@ export function InvestigatorPage(): ReactElement {
               investigationTitle={selectedCampaign?.title ?? "当前调查"}
             />
           </div>
+          {editor.investigator_id ? <section className="development-panel" aria-label="幕间成长">
+            <div>
+              <p className="eyebrow">COC7 DEVELOPMENT PHASE</p>
+              <h3>幕间成长 · 技能改善检定</h3>
+              <p>仅列出带成长标记的技能。掷 D100 高于当前技能值或结果大于 95 时，再掷 1D10 增加技能；无论成败都清除本次标记。</p>
+            </div>
+            <div className="engine-form-row">
+              <label className="field"><span>已标记技能</span><select aria-label="成长技能" value={growthSkillKey} onChange={(event) => setGrowthSkillKey(event.target.value)}><option value="">请选择</option>{editor.profile.skills.filter((item) => item.improvement_mark && !["credit_rating", "cthulhu_mythos", "mythos"].includes(item.skill_key)).map((item) => <option key={`${item.skill_key}-${item.specialization ?? ""}`} value={item.skill_key}>{item.display_name} · 当前 {item.current_value}</option>)}</select></label>
+              <label className="field"><span>D100 改善检定</span><input aria-label="改善检定 D100" min="1" max="100" type="number" value={growthRoll} onChange={(event) => setGrowthRoll(Number(event.target.value))} /></label>
+              <label className="field"><span>成功时 1D10</span><input aria-label="技能增加 1D10" min="1" max="10" type="number" value={growthIncrease} onChange={(event) => setGrowthIncrease(Number(event.target.value))} /></label>
+              <button disabled={saving || !growthSkillKey} onClick={() => void handleSkillImprovement()} type="button">结算改善检定</button>
+            </div>
+          </section> : null}
           <div className="sheet-actions">
             <span>
               {editor.investigator_id

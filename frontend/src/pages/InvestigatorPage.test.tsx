@@ -145,4 +145,39 @@ describe("InvestigatorPage", () => {
     expect(screen.getByText("达到所需难度")).toBeInTheDocument();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
   });
+
+  it("settles a marked COC7 skill improvement with player-supplied dice", async () => {
+    const marked = structuredClone(investigator);
+    marked.profile.skills[0].improvement_mark = true;
+    const improved = structuredClone(marked);
+    improved.version = 2;
+    improved.profile.skills[0].current_value = 72;
+    improved.profile.skills[0].improvement_mark = false;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/campaigns") && !init?.method) return Promise.resolve(jsonResponse([{ campaign_id: "campaign-1", title: "雾中来客", ruleset: "coc7e", era: "1920s", enabled_source_pack_ids: [], house_rules: [], version: 1 }]));
+      if (url.endsWith("/campaigns/campaign-1/investigators") && !init?.method) return Promise.resolve(jsonResponse([marked]));
+      if (url.endsWith("/skill-improvement")) return Promise.resolve(jsonResponse({
+        operation_id: "op-growth", operation_type: "skill_improvement", investigator: improved,
+        target: null, citation: {}, citations: [], loss: null, session_sanity_loss: null,
+        reason: null, damage_applied: null, injury_id: null, healed: null, care_type: null,
+        hit: null, weapon_key: null, attack_roll_id: null, skill_key: "spot_hidden",
+        skill_name: "侦查", improvement_roll: 90, increase_roll: 7, improved: true,
+        previous_skill_value: 65, current_skill_value: 72, created_at: "2026-01-01",
+      }));
+      return Promise.resolve(jsonResponse({ detail: "unexpected request" }, 500));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<InvestigatorPage />);
+    await waitFor(() => expect(screen.getByLabelText("成长技能")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("成长技能"), { target: { value: "spot_hidden" } });
+    fireEvent.change(screen.getByLabelText("改善检定 D100"), { target: { value: "90" } });
+    fireEvent.change(screen.getByLabelText("技能增加 1D10"), { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: "结算改善检定" }));
+    expect(await screen.findByText("侦查改善成功：65 → 72。")).toBeInTheDocument();
+    const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/skill-improvement"));
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+      expected_version: 1, skill_key: "spot_hidden", improvement_roll: 90, increase_roll: 7,
+    });
+  });
 });

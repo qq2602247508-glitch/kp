@@ -33,7 +33,8 @@ class SkillEntry(DomainModel):
     display_name: str = Field(min_length=1, max_length=100)
     specialization: str | None = Field(default=None, max_length=100)
     base_value: int = Field(ge=0, le=100)
-    current_value: int = Field(ge=0, le=100)
+    # COC7 explicitly allows skills improved during development to exceed 100%.
+    current_value: int = Field(ge=0, le=999)
     improvement_mark: bool = False
     source_pack_id: str | None = Field(default=None, max_length=80)
 

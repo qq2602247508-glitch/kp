@@ -215,6 +215,23 @@ export function resolveRoll(payload: RollRequest): Promise<RollResult> {
   });
 }
 
+export function applySkillImprovement(
+  campaignId: string,
+  investigatorId: string,
+  payload: {
+    expected_version: number;
+    skill_key: string;
+    specialization?: string;
+    improvement_roll: number;
+    increase_roll?: number;
+  },
+): Promise<EngineOperation> {
+  return request<EngineOperationWire>(
+    `/campaigns/${campaignId}/investigators/${investigatorId}/skill-improvement`,
+    { method: "POST", body: JSON.stringify(payload) },
+  ).then(normalizeEngineOperation);
+}
+
 export function searchRules(
   query: string,
   filters: RuleFilters,

@@ -101,6 +101,89 @@ def assert_cited(response: dict[str, object]) -> None:
     assert response["citation"] == citations[0]
 
 
+def test_marked_skill_improvement_is_deterministic_audited_and_may_exceed_100(client) -> None:
+    campaign = client.post("/api/v1/campaigns", json=campaign_payload()).json()
+    payload = investigator_payload("许文")
+    skills = payload["skills"]
+    assert isinstance(skills, list)
+    skills[0]["current_value"] = 95
+    skills[0]["improvement_mark"] = True
+    created = client.post(
+        f"/api/v1/campaigns/{campaign['campaign_id']}/investigators", json=payload
+    ).json()
+
+    response = client.post(
+        f"/api/v1/campaigns/{campaign['campaign_id']}/investigators/{created['investigator_id']}/skill-improvement",
+        json={
+            "expected_version": created["version"],
+            "skill_key": "fighting_brawl",
+            "improvement_roll": 96,
+            "increase_roll": 10,
+        },
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["operation_type"] == "skill_improvement"
+    assert result["improved"] is True
+    assert result["previous_skill_value"] == 95
+    assert result["current_skill_value"] == 105
+    improved_skill = next(
+        item for item in result["investigator"]["skills"]
+        if item["skill_key"] == "fighting_brawl"
+    )
+    assert improved_skill["current_value"] == 105
+    assert improved_skill["improvement_mark"] is False
+    assert_cited(result)
+
+    operations = client.get(
+        f"/api/v1/campaigns/{campaign['campaign_id']}/rule-operations"
+    ).json()
+    assert operations[-1]["operation_type"] == "skill_improvement"
+    audits = client.get(f"/api/v1/campaigns/{campaign['campaign_id']}/audits").json()
+    assert audits[-1]["action"] == "skill_improvement"
+
+
+def test_skill_improvement_consumes_a_mark_on_failure_and_rejects_wrong_dice(client) -> None:
+    campaign = client.post("/api/v1/campaigns", json=campaign_payload()).json()
+    payload = investigator_payload("沈遥")
+    skills = payload["skills"]
+    assert isinstance(skills, list)
+    skills[0]["improvement_mark"] = True
+    created = client.post(
+        f"/api/v1/campaigns/{campaign['campaign_id']}/investigators", json=payload
+    ).json()
+    url = (
+        f"/api/v1/campaigns/{campaign['campaign_id']}/investigators/"
+        f"{created['investigator_id']}/skill-improvement"
+    )
+    invalid = client.post(
+        url,
+        json={
+            "expected_version": created["version"],
+            "skill_key": "fighting_brawl",
+            "improvement_roll": 40,
+            "increase_roll": 3,
+        },
+    )
+    assert invalid.status_code == 422
+
+    failed = client.post(
+        url,
+        json={
+            "expected_version": created["version"],
+            "skill_key": "fighting_brawl",
+            "improvement_roll": 40,
+        },
+    )
+    assert failed.status_code == 200, failed.text
+    assert failed.json()["improved"] is False
+    assert failed.json()["current_skill_value"] == 55
+    assert next(
+        item for item in failed.json()["investigator"]["skills"]
+        if item["skill_key"] == "fighting_brawl"
+    )["improvement_mark"] is False
+
+
 def test_legacy_single_citation_data_is_read_as_a_one_item_list() -> None:
     legacy = {
         "citation_id": "coc7e.core.sanity-loss-and-insanity",

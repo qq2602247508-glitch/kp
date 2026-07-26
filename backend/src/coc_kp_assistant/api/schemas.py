@@ -268,6 +268,16 @@ class CombatRequest(DomainModel):
         return self
 
 
+class SkillImprovementRequest(DomainModel):
+    expected_version: int = Field(ge=1)
+    skill_key: str = Field(min_length=1, max_length=80)
+    specialization: str | None = Field(default=None, max_length=100)
+    improvement_roll: int = Field(ge=1, le=100)
+    increase_roll: int | None = Field(default=None, ge=1, le=10)
+    session_key: str | None = Field(default=None, max_length=120)
+    case_session_id: UUID | None = None
+
+
 class EngineOperationResponse(DomainModel):
     operation_id: UUID
     operation_type: str
@@ -286,6 +296,13 @@ class EngineOperationResponse(DomainModel):
     hit: bool | None = None
     weapon_key: str | None = None
     attack_roll_id: UUID | None = None
+    skill_key: str | None = None
+    skill_name: str | None = None
+    improvement_roll: int | None = None
+    increase_roll: int | None = None
+    improved: bool | None = None
+    previous_skill_value: int | None = None
+    current_skill_value: int | None = None
     passed: bool | None = None
     period_key: str | None = None
     terminal: bool | None = None
