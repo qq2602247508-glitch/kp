@@ -10,17 +10,28 @@ from coc_kp_assistant.api.schemas import (
     BackstoryReplace,
     CampaignReplace,
     CampaignResponse,
+    ChaseAdvanceRequest,
+    ChaseCreateRequest,
+    ChaseResponse,
+    CombatRequest,
+    EngineCitationResponse,
+    EngineOperationResponse,
+    InjuryRequest,
     InvestigatorReplace,
     InvestigatorResponse,
     RecordedRollRequest,
     RecordedRollResponse,
+    RecoveryRequest,
     RuleAnswerRequest,
     RuleAnswerResponse,
     RuleCitationResponse,
+    RuleOperationLogResponse,
     RuleSearchResponse,
+    SanityLossRequest,
     SkillsReplace,
+    WeaponPolicyResponse,
 )
-from coc_kp_assistant.application import case_service, service
+from coc_kp_assistant.application import case_service, rule_engine_service, service
 from coc_kp_assistant.domain.campaigns import CampaignCreate
 from coc_kp_assistant.domain.case_state import (
     CaseEntityKind,
@@ -30,6 +41,7 @@ from coc_kp_assistant.domain.case_state import (
     PlayerCaseEntryResponse,
 )
 from coc_kp_assistant.domain.investigators import InvestigatorCreate
+from coc_kp_assistant.domain.rule_engines import WEAPONS
 from coc_kp_assistant.infrastructure.database import session_dependency
 from coc_kp_assistant.rag import IndexCompatibilityError, IndexIncompleteError
 from coc_kp_assistant.rules import (
@@ -68,6 +80,14 @@ def _not_found_or_conflict(error: Exception) -> HTTPException:
 
 def _case_state_error(error: Exception) -> HTTPException:
     if isinstance(error, case_service.InvalidCaseStateError):
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        )
+    return _not_found_or_conflict(error)
+
+
+def _rule_engine_error(error: Exception) -> HTTPException:
+    if isinstance(error, rule_engine_service.InvalidRuleOperationError):
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
         )
@@ -324,6 +344,165 @@ def delete_investigator(
     except (service.EntityNotFoundError, service.VersionConflictError) as error:
         raise _not_found_or_conflict(error) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/campaigns/{campaign_id}/investigators/{investigator_id}/sanity-loss",
+    response_model=EngineOperationResponse,
+)
+def apply_sanity_loss(
+    campaign_id: UUID,
+    investigator_id: UUID,
+    payload: SanityLossRequest,
+    session: DatabaseSession,
+) -> EngineOperationResponse:
+    try:
+        return rule_engine_service.apply_sanity_loss(
+            session, campaign_id, investigator_id, payload
+        )
+    except (
+        service.EntityNotFoundError,
+        service.VersionConflictError,
+        rule_engine_service.InvalidRuleOperationError,
+    ) as error:
+        raise _rule_engine_error(error) from error
+
+
+@router.post(
+    "/campaigns/{campaign_id}/investigators/{investigator_id}/injury",
+    response_model=EngineOperationResponse,
+)
+def apply_injury(
+    campaign_id: UUID,
+    investigator_id: UUID,
+    payload: InjuryRequest,
+    session: DatabaseSession,
+) -> EngineOperationResponse:
+    try:
+        return rule_engine_service.apply_injury(
+            session, campaign_id, investigator_id, payload
+        )
+    except (service.EntityNotFoundError, service.VersionConflictError) as error:
+        raise _rule_engine_error(error) from error
+
+
+@router.post(
+    "/campaigns/{campaign_id}/investigators/{investigator_id}/recovery",
+    response_model=EngineOperationResponse,
+)
+def apply_recovery(
+    campaign_id: UUID,
+    investigator_id: UUID,
+    payload: RecoveryRequest,
+    session: DatabaseSession,
+) -> EngineOperationResponse:
+    try:
+        return rule_engine_service.apply_recovery(
+            session, campaign_id, investigator_id, payload
+        )
+    except (
+        service.EntityNotFoundError,
+        service.VersionConflictError,
+        rule_engine_service.InvalidRuleOperationError,
+    ) as error:
+        raise _rule_engine_error(error) from error
+
+
+@router.get("/rule-engines/weapons", response_model=list[WeaponPolicyResponse])
+def list_weapons() -> list[WeaponPolicyResponse]:
+    return [
+        WeaponPolicyResponse(
+            weapon_key=weapon.weapon_key,
+            name=weapon.name,
+            damage_notation=weapon.damage_notation,
+            maximum_rolled_damage=weapon.maximum_rolled_damage,
+            skill_key=weapon.skill_key,
+            uses_damage_bonus=weapon.uses_damage_bonus,
+            citation=EngineCitationResponse.model_validate(weapon.citation.as_dict()),
+        )
+        for weapon in WEAPONS
+    ]
+
+
+@router.post(
+    "/campaigns/{campaign_id}/combat/resolve",
+    response_model=EngineOperationResponse,
+)
+def resolve_combat(
+    campaign_id: UUID,
+    payload: CombatRequest,
+    session: DatabaseSession,
+) -> EngineOperationResponse:
+    try:
+        return rule_engine_service.resolve_combat(session, campaign_id, payload)
+    except (
+        service.EntityNotFoundError,
+        service.VersionConflictError,
+        rule_engine_service.InvalidRuleOperationError,
+    ) as error:
+        raise _rule_engine_error(error) from error
+
+
+@router.post(
+    "/campaigns/{campaign_id}/chases",
+    response_model=ChaseResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_chase(
+    campaign_id: UUID,
+    payload: ChaseCreateRequest,
+    session: DatabaseSession,
+) -> ChaseResponse:
+    try:
+        return rule_engine_service.create_chase(session, campaign_id, payload)
+    except (
+        service.EntityNotFoundError,
+        rule_engine_service.InvalidRuleOperationError,
+    ) as error:
+        raise _rule_engine_error(error) from error
+
+
+@router.get("/campaigns/{campaign_id}/chases", response_model=list[ChaseResponse])
+def list_chases(campaign_id: UUID, session: DatabaseSession) -> list[ChaseResponse]:
+    try:
+        return rule_engine_service.list_chases(session, campaign_id)
+    except service.EntityNotFoundError as error:
+        raise _rule_engine_error(error) from error
+
+
+@router.post(
+    "/campaigns/{campaign_id}/chases/{chase_id}/advance",
+    response_model=ChaseResponse,
+)
+def advance_chase(
+    campaign_id: UUID,
+    chase_id: UUID,
+    payload: ChaseAdvanceRequest,
+    session: DatabaseSession,
+) -> ChaseResponse:
+    try:
+        return rule_engine_service.advance_chase(
+            session, campaign_id, chase_id, payload
+        )
+    except (
+        service.EntityNotFoundError,
+        service.VersionConflictError,
+        rule_engine_service.InvalidRuleOperationError,
+    ) as error:
+        raise _rule_engine_error(error) from error
+
+
+@router.get(
+    "/campaigns/{campaign_id}/rule-operations",
+    response_model=list[RuleOperationLogResponse],
+)
+def list_rule_operations(
+    campaign_id: UUID, session: DatabaseSession
+) -> list[RuleOperationLogResponse]:
+    try:
+        return rule_engine_service.list_operations(session, campaign_id)
+    except service.EntityNotFoundError as error:
+        raise _rule_engine_error(error) from error
 
 
 @router.post(

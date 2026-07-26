@@ -215,3 +215,72 @@ export type CaseEntry = Required<
   created_at: string;
   updated_at: string;
 };
+
+export type EngineCitation = {
+  citation_id: string;
+  source_pack_id: string;
+  filename: string;
+  page: number;
+  section: string;
+};
+
+export type EngineOperation = {
+  operation_id: string;
+  operation_type: string;
+  investigator: Investigator;
+  target: Investigator | null;
+  citation: EngineCitation;
+  loss: number | null;
+  session_sanity_loss: number | null;
+  reason: string | null;
+  damage_applied: number | null;
+  healed: number | null;
+  care_type: string | null;
+  hit: boolean | null;
+  weapon_key: string | null;
+  attack_roll_id: string | null;
+  created_at: string;
+};
+
+export type RuleOperationLog = {
+  operation_id: string;
+  campaign_id: string;
+  subject_id: string;
+  case_session_id: string | null;
+  session_key: string | null;
+  operation_type: string;
+  input_data: Record<string, unknown>;
+  output_data: Record<string, unknown>;
+  citation: EngineCitation;
+  created_at: string;
+};
+
+export type WeaponPolicy = {
+  weapon_key: string;
+  name: string;
+  damage_notation: string;
+  maximum_rolled_damage: number;
+  skill_key: string;
+  uses_damage_bonus: boolean;
+  citation: EngineCitation;
+};
+
+export type ChaseParticipant = {
+  investigator_id: string;
+  role: "pursuer" | "fleeing";
+  position: number;
+};
+
+export type Chase = {
+  chase_id: string;
+  campaign_id: string;
+  title: string;
+  case_session_id: string | null;
+  session_key: string | null;
+  status: string;
+  participants: ChaseParticipant[];
+  version: number;
+  citation: EngineCitation;
+  created_at: string;
+  updated_at: string;
+};

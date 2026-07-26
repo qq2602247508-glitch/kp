@@ -8,6 +8,11 @@ import type {
   InvestigatorCondition,
   InvestigatorProfile,
   InvestigatorUpdate,
+  Chase,
+  ChaseParticipant,
+  EngineOperation,
+  RuleOperationLog,
+  WeaponPolicy,
   RollRequest,
   RollResult,
   RuleAnswerResponse,
@@ -26,6 +31,11 @@ type InvestigatorWire = InvestigatorProfile & {
   mythos: number;
   conditions: InvestigatorCondition[];
   version: number;
+};
+
+type EngineOperationWire = Omit<EngineOperation, "investigator" | "target"> & {
+  investigator: InvestigatorWire | Investigator;
+  target: InvestigatorWire | Investigator | null;
 };
 
 export class ApiError extends Error {
@@ -200,6 +210,122 @@ export function answerRules(
   });
 }
 
+export function applySanityLoss(
+  campaignId: string,
+  investigatorId: string,
+  payload: {
+    expected_version: number;
+    loss: number;
+    reason: string;
+    session_key: string;
+    intelligence_check_passed?: boolean;
+  },
+): Promise<EngineOperation> {
+  return request<EngineOperationWire>(
+    `/campaigns/${campaignId}/investigators/${investigatorId}/sanity-loss`,
+    { method: "POST", body: JSON.stringify(payload) },
+  ).then(normalizeEngineOperation);
+}
+
+export function applyInjury(
+  campaignId: string,
+  investigatorId: string,
+  payload: {
+    expected_version: number;
+    damage: number;
+    reason: string;
+    session_key?: string;
+  },
+): Promise<EngineOperation> {
+  return request<EngineOperationWire>(
+    `/campaigns/${campaignId}/investigators/${investigatorId}/injury`,
+    { method: "POST", body: JSON.stringify(payload) },
+  ).then(normalizeEngineOperation);
+}
+
+export function applyRecovery(
+  campaignId: string,
+  investigatorId: string,
+  payload: {
+    expected_version: number;
+    care_type: "first_aid" | "medicine" | "natural";
+    healing_roll?: number;
+    session_key?: string;
+  },
+): Promise<EngineOperation> {
+  return request<EngineOperationWire>(
+    `/campaigns/${campaignId}/investigators/${investigatorId}/recovery`,
+    { method: "POST", body: JSON.stringify(payload) },
+  ).then(normalizeEngineOperation);
+}
+
+export function listRuleOperations(
+  campaignId: string,
+  signal?: AbortSignal,
+): Promise<RuleOperationLog[]> {
+  return request<RuleOperationLog[]>(
+    `/campaigns/${campaignId}/rule-operations`,
+    { signal },
+  );
+}
+
+export function listWeapons(signal?: AbortSignal): Promise<WeaponPolicy[]> {
+  return request<WeaponPolicy[]>("/rule-engines/weapons", { signal });
+}
+
+export function resolveCombat(
+  campaignId: string,
+  payload: {
+    attacker_id: string;
+    target_id: string;
+    target_expected_version: number;
+    attack_roll_id: string;
+    weapon_key: string;
+    rolled_damage: number;
+    session_key?: string;
+  },
+): Promise<EngineOperation> {
+  return request<EngineOperationWire>(`/campaigns/${campaignId}/combat/resolve`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }).then(normalizeEngineOperation);
+}
+
+export function listChases(
+  campaignId: string,
+  signal?: AbortSignal,
+): Promise<Chase[]> {
+  return request<Chase[]>(`/campaigns/${campaignId}/chases`, { signal });
+}
+
+export function createChase(
+  campaignId: string,
+  payload: {
+    title: string;
+    session_key?: string;
+    participants: ChaseParticipant[];
+  },
+): Promise<Chase> {
+  return request<Chase>(`/campaigns/${campaignId}/chases`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function advanceChase(
+  campaignId: string,
+  chaseId: string,
+  payload: {
+    expected_version: number;
+    moves: { investigator_id: string; move_units: number }[];
+  },
+): Promise<Chase> {
+  return request<Chase>(
+    `/campaigns/${campaignId}/chases/${chaseId}/advance`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
 function ruleQueryParams(query: string, filters: RuleFilters): URLSearchParams {
   const params = new URLSearchParams({ q: query, limit: "8" });
   appendFilters(params, "source_pack", filters.sourcePack);
@@ -251,5 +377,13 @@ function normalizeInvestigator(value: InvestigatorWire | Investigator): Investig
     conditions,
     version,
     profile,
+  };
+}
+
+function normalizeEngineOperation(value: EngineOperationWire): EngineOperation {
+  return {
+    ...value,
+    investigator: normalizeInvestigator(value.investigator),
+    target: value.target ? normalizeInvestigator(value.target) : null,
   };
 }

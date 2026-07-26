@@ -1,8 +1,10 @@
 import { useState, type ReactElement } from "react";
 
 import { InvestigatorPage } from "./pages/InvestigatorPage";
+import { CombatChasePage } from "./pages/CombatChasePage";
 import { CaseWorkspacePage } from "./pages/CaseWorkspacePage";
 import { RulesPage } from "./pages/RulesPage";
+import { SanityInjuryPage } from "./pages/SanityInjuryPage";
 
 type Workspace =
   | "dashboard"
@@ -110,6 +112,8 @@ export function App(): ReactElement {
         {workspace === "dashboard" ? <Dashboard /> : null}
         {workspace === "investigators" ? <InvestigatorPage /> : null}
         {workspace === "rules" ? <RulesPage /> : null}
+        {workspace === "sanity" ? <SanityInjuryPage /> : null}
+        {workspace === "encounters" ? <CombatChasePage /> : null}
         {workspace === "table" ? <CaseWorkspacePage initialKind="sessions" /> : null}
         {workspace === "people" ? <CaseWorkspacePage initialKind="people" /> : null}
         {workspace === "locations" ? <CaseWorkspacePage initialKind="locations" /> : null}
@@ -120,6 +124,8 @@ export function App(): ReactElement {
         workspace !== "people" &&
         workspace !== "locations" &&
         workspace !== "clues" &&
+        workspace !== "sanity" &&
+        workspace !== "encounters" &&
         workspace !== "rules" ? (
           <section className="placeholder" aria-live="polite">
             <span className="large-sigil" aria-hidden="true">

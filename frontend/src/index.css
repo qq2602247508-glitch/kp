@@ -357,6 +357,120 @@ h1 {
   line-height: 1.8;
 }
 
+.engine-workspace {
+  display: grid;
+  gap: 16px;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px 28px 40px;
+}
+
+.engine-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.engine-panel {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  padding: 20px;
+  border: 1px solid #303d35;
+  border-radius: 7px;
+  background: rgba(15, 22, 19, 0.9);
+}
+
+.engine-panel h3 {
+  margin: 0;
+  color: #c9cbbf;
+  font-family: Georgia, "Songti SC", serif;
+  font-weight: 500;
+}
+
+.engine-summary,
+.engine-panel > p {
+  margin: 0;
+  color: #859188;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.engine-form-grid,
+.engine-form-row {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+}
+
+.engine-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.engine-form-row {
+  grid-template-columns: minmax(100px, 1fr) auto auto;
+}
+
+.engine-panel button {
+  min-height: 35px;
+  padding: 7px 13px;
+}
+
+.engine-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.citation-card,
+.chase-track {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border-left: 2px solid #728874;
+  color: #9fab9f;
+  background: #101915;
+  font-size: 11px;
+}
+
+.citation-card small,
+.chase-track small,
+.operation-list small {
+  color: #65736b;
+}
+
+.operation-list {
+  display: grid;
+  gap: 8px;
+  max-height: 390px;
+  overflow: auto;
+}
+
+.operation-list > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid #29362f;
+  border-radius: 4px;
+  color: #859188;
+  background: #0c1311;
+  font-size: 11px;
+}
+
+.operation-list strong {
+  color: #bac3b7;
+}
+
+@media (max-width: 900px) {
+  .engine-grid,
+  .engine-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .engine-form-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .investigator-workspace {
   display: grid;
   gap: 18px;

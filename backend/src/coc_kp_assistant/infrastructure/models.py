@@ -246,6 +246,62 @@ class StateAuditRecord(Base):
     )
 
 
+class RuleOperationRecord(Base):
+    __tablename__ = "rule_operation_logs"
+    __table_args__ = (
+        CheckConstraint("ruleset = 'coc7e'", name="ck_rule_operation_ruleset_coc7e"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    subject_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    case_session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("case_sessions.id", ondelete="SET NULL"), index=True
+    )
+    session_key: Mapped[str | None] = mapped_column(String(120), index=True)
+    ruleset: Mapped[str] = mapped_column(String(20), nullable=False, default="coc7e")
+    operation_type: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    input_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    output_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    citation_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+
+class ChaseRecord(Base):
+    __tablename__ = "chases"
+    __table_args__ = (
+        CheckConstraint("ruleset = 'coc7e'", name="ck_chase_ruleset_coc7e"),
+        CheckConstraint("version >= 1", name="ck_chase_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    case_session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("case_sessions.id", ondelete="SET NULL"), index=True
+    )
+    session_key: Mapped[str | None] = mapped_column(String(120), index=True)
+    ruleset: Mapped[str] = mapped_column(String(20), nullable=False, default="coc7e")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+    participants: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class CaseSessionRecord(Base):
     __tablename__ = "case_sessions"
     __table_args__ = (

@@ -46,4 +46,21 @@ describe("COC KP application shell", () => {
     expect(screen.getByText("玩家可见信息")).toBeInTheDocument();
     expect(screen.getByText("KP 真相")).toBeInTheDocument();
   });
+
+  it("opens usable sanity and encounter engines instead of placeholders", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /理智与疯狂/ }));
+    expect(
+      await screen.findByRole("heading", { name: "理智、疯狂与伤势" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "记录理智损失" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /战斗与追逐/ }));
+    expect(
+      await screen.findByRole("heading", { name: "战斗与追逐记录台" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "结算攻击" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "建立追逐" })).toBeInTheDocument();
+  });
 });

@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
 from pydantic import ConfigDict, Field, model_validator
@@ -167,3 +168,146 @@ class RuleAnswerResponse(DomainModel):
     citations: tuple[RuleCitationResponse, ...]
     abstained: bool
     reason: str | None
+
+
+class EngineCitationResponse(DomainModel):
+    citation_id: str
+    source_pack_id: str
+    filename: str
+    page: int
+    section: str
+
+
+class SanityLossRequest(DomainModel):
+    expected_version: int = Field(ge=1)
+    loss: int = Field(ge=0, le=100)
+    reason: str = Field(min_length=1, max_length=300)
+    session_key: str = Field(min_length=1, max_length=120)
+    case_session_id: UUID | None = None
+    intelligence_check_passed: bool | None = None
+
+
+class InjuryRequest(DomainModel):
+    expected_version: int = Field(ge=1)
+    damage: int = Field(ge=0, le=100)
+    reason: str = Field(min_length=1, max_length=300)
+    session_key: str | None = Field(default=None, max_length=120)
+    case_session_id: UUID | None = None
+
+
+class RecoveryRequest(DomainModel):
+    expected_version: int = Field(ge=1)
+    care_type: str = Field(pattern=r"^(first_aid|medicine|natural)$")
+    healing_roll: int | None = Field(default=None, ge=1, le=3)
+    session_key: str | None = Field(default=None, max_length=120)
+    case_session_id: UUID | None = None
+
+
+class CombatRequest(DomainModel):
+    attacker_id: UUID
+    target_id: UUID
+    target_expected_version: int = Field(ge=1)
+    attack_roll_id: UUID
+    weapon_key: str = Field(min_length=1, max_length=80)
+    rolled_damage: int = Field(ge=0, le=100)
+    session_key: str | None = Field(default=None, max_length=120)
+    case_session_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def distinct_participants(self) -> "CombatRequest":
+        if self.attacker_id == self.target_id:
+            raise ValueError("attacker and target must be distinct")
+        return self
+
+
+class EngineOperationResponse(DomainModel):
+    operation_id: UUID
+    operation_type: str
+    investigator: InvestigatorResponse
+    target: InvestigatorResponse | None = None
+    citation: EngineCitationResponse
+    loss: int | None = None
+    sanity_before: int | None = None
+    session_sanity_loss: int | None = None
+    reason: str | None = None
+    damage_applied: int | None = None
+    healed: int | None = None
+    care_type: str | None = None
+    hit: bool | None = None
+    weapon_key: str | None = None
+    attack_roll_id: UUID | None = None
+    created_at: datetime
+
+
+class WeaponPolicyResponse(DomainModel):
+    weapon_key: str
+    name: str
+    damage_notation: str
+    maximum_rolled_damage: int
+    skill_key: str
+    uses_damage_bonus: bool
+    citation: EngineCitationResponse
+
+
+class ChaseParticipant(DomainModel):
+    investigator_id: UUID
+    role: str = Field(pattern=r"^(pursuer|fleeing)$")
+    position: int = Field(default=0, ge=0, le=10000)
+
+
+class ChaseCreateRequest(DomainModel):
+    title: str = Field(min_length=1, max_length=200)
+    session_key: str | None = Field(default=None, max_length=120)
+    case_session_id: UUID | None = None
+    participants: tuple[ChaseParticipant, ...] = Field(min_length=2, max_length=20)
+
+    @model_validator(mode="after")
+    def unique_participants(self) -> "ChaseCreateRequest":
+        ids = [item.investigator_id for item in self.participants]
+        if len(ids) != len(set(ids)):
+            raise ValueError("chase participants must be unique")
+        return self
+
+
+class ChaseMove(DomainModel):
+    investigator_id: UUID
+    move_units: int = Field(ge=0, le=1)
+
+
+class ChaseAdvanceRequest(DomainModel):
+    expected_version: int = Field(ge=1)
+    moves: tuple[ChaseMove, ...] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def unique_moves(self) -> "ChaseAdvanceRequest":
+        ids = [item.investigator_id for item in self.moves]
+        if len(ids) != len(set(ids)):
+            raise ValueError("each participant may move once per advance")
+        return self
+
+
+class ChaseResponse(DomainModel):
+    chase_id: UUID
+    campaign_id: UUID
+    title: str
+    case_session_id: UUID | None
+    session_key: str | None
+    status: str
+    participants: tuple[ChaseParticipant, ...]
+    version: int
+    citation: EngineCitationResponse
+    created_at: datetime
+    updated_at: datetime
+
+
+class RuleOperationLogResponse(DomainModel):
+    operation_id: UUID
+    campaign_id: UUID
+    subject_id: UUID
+    case_session_id: UUID | None
+    session_key: str | None
+    operation_type: str
+    input_data: dict[str, Any]
+    output_data: dict[str, Any]
+    citation: EngineCitationResponse
+    created_at: datetime
