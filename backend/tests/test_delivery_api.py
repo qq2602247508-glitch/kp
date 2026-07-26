@@ -234,6 +234,10 @@ def test_import_rejects_domain_and_schema_corruption_before_any_write(
     malformed = deepcopy(bundle)
     del malformed["tables"]["campaigns"][0]["updated_at"]
     corruptions.append(malformed)
+    malformed = deepcopy(bundle)
+    assert malformed["tables"]["state_audits"]
+    malformed["tables"]["state_audits"][0]["campaign_id"] = None
+    corruptions.append(malformed)
 
     for index, malformed_bundle in enumerate(corruptions):
         with _client(tmp_path / f"target-{index}") as target:

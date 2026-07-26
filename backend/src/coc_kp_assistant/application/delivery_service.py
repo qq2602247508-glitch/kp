@@ -878,10 +878,7 @@ def _validated_import(
             _validate_database_row(table_name, row)
             if "ruleset" in table.c and row.get("ruleset") != RULESET_NAMESPACE:
                 raise DeliveryValidationError(f"{table_name} contains a foreign ruleset")
-            if "campaign_id" in table.c and row.get("campaign_id") not in {
-                campaign_id,
-                None,
-            }:
+            if "campaign_id" in table.c and row.get("campaign_id") != campaign_id:
                 raise DeliveryValidationError(
                     f"{table_name} contains an invalid campaign reference"
                 )
