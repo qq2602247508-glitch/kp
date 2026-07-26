@@ -74,6 +74,26 @@ def test_ollama_adapter_calls_only_embed_with_the_installed_model() -> None:
     ]
 
 
+def test_ollama_adapter_default_client_ignores_environment_proxies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_options: dict[str, object] = {}
+
+    class StubClient:
+        def __init__(self, **kwargs: object) -> None:
+            client_options.update(kwargs)
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(httpx, "Client", StubClient)
+
+    provider = OllamaEmbeddingProvider()
+    provider.close()
+
+    assert client_options["trust_env"] is False
+
+
 def test_ollama_adapter_batches_large_corpora_without_changing_order() -> None:
     request_inputs: list[list[str]] = []
 

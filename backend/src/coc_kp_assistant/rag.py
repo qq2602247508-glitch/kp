@@ -157,7 +157,9 @@ class OllamaEmbeddingProvider:
         if batch_size < 1:
             raise ValueError("embedding batch size must be positive")
         self.dimension = dimension
-        self._client = client or httpx.Client(timeout=120.0)
+        # Ollama is a loopback-only dependency. Ignoring proxy environment
+        # variables avoids routing local embeddings through a system SOCKS proxy.
+        self._client = client or httpx.Client(timeout=120.0, trust_env=False)
         self._base_url = base_url.rstrip("/")
         self._batch_size = batch_size
         self._owns_client = client is None
@@ -831,7 +833,9 @@ def _chunk_record(record: dict[str, object], *, max_chars: int) -> list[RuleChun
     )
     result: list[RuleChunk] = []
     for unit in _source_units(record):
-        for section, section_text in _heading_sections(unit.text, fallback=unit.locator):
+        for section_ordinal, (section, section_text) in enumerate(
+            _heading_sections(unit.text, fallback=unit.locator), start=1
+        ):
             for ordinal, text in enumerate(
                 _bounded_text(section_text, max_chars=max_chars), start=1
             ):
@@ -840,6 +844,7 @@ def _chunk_record(record: dict[str, object], *, max_chars: int) -> list[RuleChun
                         pack_id,
                         unit.locator,
                         section,
+                        str(section_ordinal),
                         str(ordinal),
                         identity_metadata,
                         hashlib.sha256(text.encode("utf-8")).hexdigest(),

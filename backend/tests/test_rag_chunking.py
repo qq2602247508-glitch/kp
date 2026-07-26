@@ -118,6 +118,22 @@ def test_editing_one_page_changes_only_that_pages_chunk_ids() -> None:
     ]
 
 
+def test_repeated_identical_headings_in_one_source_unit_get_unique_ids() -> None:
+    record = _record()
+    record["content"]["pages"][0]["text"] = (  # type: ignore[index]
+        "# Repeated\nSame text.\n\n# Repeated\nSame text."
+    )
+    record["content"]["pages"] = record["content"]["pages"][:1]  # type: ignore[index]
+
+    chunks = chunk_corpus(
+        Corpus(PRODUCT_NAMESPACE, RULESET_NAMESPACE, (record,)),
+        max_chars=80,
+    )
+
+    assert len(chunks) == 2
+    assert len({chunk.chunk_id for chunk in chunks}) == 2
+
+
 @pytest.mark.parametrize(
     ("product", "ruleset"),
     [
