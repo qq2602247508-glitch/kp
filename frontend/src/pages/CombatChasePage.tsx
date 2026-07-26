@@ -5,6 +5,7 @@ import {
   advanceChase,
   createChase,
   listCampaigns,
+  listCaseEntries,
   listChases,
   listInvestigators,
   listRuleOperations,
@@ -14,6 +15,7 @@ import {
 } from "../api/client";
 import type {
   Campaign,
+  CaseEntry,
   Chase,
   Investigator,
   RuleOperationLog,
@@ -33,6 +35,8 @@ export function CombatChasePage(): ReactElement {
   const [investigators, setInvestigators] = useState<Investigator[]>([]);
   const [attackerId, setAttackerId] = useState("");
   const [targetId, setTargetId] = useState("");
+  const [sessions, setSessions] = useState<CaseEntry[]>([]);
+  const [caseSessionId, setCaseSessionId] = useState("");
   const [weapons, setWeapons] = useState<WeaponPolicy[]>([]);
   const [weaponKey, setWeaponKey] = useState("unarmed");
   const [damage, setDamage] = useState(1);
@@ -72,6 +76,7 @@ export function CombatChasePage(): ReactElement {
     if (!campaignId) {
       setInvestigators([]);
       setChases([]);
+      setSessions([]);
       return;
     }
     const controller = new AbortController();
@@ -79,13 +84,16 @@ export function CombatChasePage(): ReactElement {
       listInvestigators(campaignId, controller.signal),
       listChases(campaignId, controller.signal),
       listRuleOperations(campaignId, controller.signal),
+      listCaseEntries(campaignId, "sessions", controller.signal),
     ])
-      .then(([people, chaseItems, operationItems]) => {
+      .then(([people, chaseItems, operationItems, sessionEntries]) => {
         setInvestigators(people);
-        setAttackerId((current) => current || people[0]?.investigator_id || "");
-        setTargetId((current) => current || people[1]?.investigator_id || "");
+        setAttackerId((current) => people.some((item) => item.investigator_id === current) ? current : people[0]?.investigator_id || "");
+        setTargetId((current) => people.some((item) => item.investigator_id === current) ? current : people[1]?.investigator_id || "");
         setChases(chaseItems);
         setLogs(operationItems);
+        setSessions(sessionEntries);
+        setCaseSessionId((current) => sessionEntries.some((item) => item.entity_id === current) ? current : sessionEntries[0]?.entity_id || "");
       })
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -96,6 +104,10 @@ export function CombatChasePage(): ReactElement {
   }, [campaignId]);
 
   async function handleCombat(): Promise<void> {
+    if (!caseSessionId) {
+      setFailure("请先选择案件场次；战斗结算必须归属到场次。");
+      return;
+    }
     if (!attacker || !target || attacker.investigator_id === target.investigator_id) {
       setFailure("请选择不同的攻击者和目标。");
       return;
@@ -113,6 +125,7 @@ export function CombatChasePage(): ReactElement {
           ?.current_value ?? (weapon.skill_key.startsWith("firearms_") ? 20 : 25);
       const roll = await resolveRoll({
         campaign_id: campaignId,
+        case_session_id: caseSessionId,
         investigator_id: attacker.investigator_id,
         skill_key: weapon.skill_key,
         label: `${weapon.name}攻击`,
@@ -127,6 +140,7 @@ export function CombatChasePage(): ReactElement {
         attack_roll_id: roll.roll_id,
         weapon_key: weaponKey,
         rolled_damage: damage,
+        case_session_id: caseSessionId,
       });
       setInvestigators((items) =>
         items.map((item) =>
@@ -148,6 +162,14 @@ export function CombatChasePage(): ReactElement {
     }
   }
 
+  function changeCampaign(nextCampaignId: string): void {
+    setCampaignId(nextCampaignId);
+    setAttackerId("");
+    setTargetId("");
+    setCaseSessionId("");
+    setChases([]);
+  }
+
   async function handleCreateChase(): Promise<void> {
     if (!attacker || !target || attacker.investigator_id === target.investigator_id) {
       setFailure("建立追逐需要两名不同的参与者。");
@@ -157,6 +179,7 @@ export function CombatChasePage(): ReactElement {
     try {
       const chase = await createChase(campaignId, {
         title: "现场追逐",
+        case_session_id: caseSessionId || undefined,
         participants: [
           { investigator_id: attacker.investigator_id, role: "pursuer", position: 0 },
           { investigator_id: target.investigator_id, role: "fleeing", position: 2 },
@@ -206,13 +229,20 @@ export function CombatChasePage(): ReactElement {
         </div>
         <label className="field">
           <span>调查</span>
-          <select value={campaignId} onChange={(event) => setCampaignId(event.target.value)}>
+          <select value={campaignId} onChange={(event) => changeCampaign(event.target.value)}>
             <option value="">请选择</option>
             {campaigns.map((campaign) => (
               <option key={campaign.campaign_id} value={campaign.campaign_id}>
                 {campaign.title}
               </option>
             ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>案件场次</span>
+          <select value={caseSessionId} onChange={(event) => setCaseSessionId(event.target.value)}>
+            <option value="">请选择</option>
+            {sessions.map((session) => <option key={session.entity_id} value={session.entity_id}>{session.title}</option>)}
           </select>
         </label>
       </header>
@@ -264,7 +294,7 @@ export function CombatChasePage(): ReactElement {
               />
             </label>
           </div>
-          <button disabled={busy || !attacker || !target} onClick={() => void handleCombat()} type="button">
+          <button disabled={busy || !attacker || !target || !caseSessionId} onClick={() => void handleCombat()} type="button">
             结算攻击
           </button>
           <p className="section-help">

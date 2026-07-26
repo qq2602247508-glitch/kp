@@ -115,6 +115,7 @@ export type RollDifficulty = "regular" | "hard" | "extreme";
 
 export type RollRequest = {
   campaign_id: string;
+  case_session_id?: string;
   investigator_id?: string;
   skill_key?: string;
   label: string;
@@ -234,6 +235,7 @@ export type EngineOperation = {
   session_sanity_loss: number | null;
   reason: string | null;
   damage_applied: number | null;
+  injury_id: string | null;
   healed: number | null;
   care_type: string | null;
   hit: boolean | null;

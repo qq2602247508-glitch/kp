@@ -218,7 +218,8 @@ export function applySanityLoss(
     loss: number;
     reason: string;
     session_key: string;
-    intelligence_check_passed?: boolean;
+    case_session_id: string;
+    intelligence_roll_id?: string;
   },
 ): Promise<EngineOperation> {
   return request<EngineOperationWire>(
@@ -235,6 +236,7 @@ export function applyInjury(
     damage: number;
     reason: string;
     session_key?: string;
+    case_session_id: string;
   },
 ): Promise<EngineOperation> {
   return request<EngineOperationWire>(
@@ -249,8 +251,13 @@ export function applyRecovery(
   payload: {
     expected_version: number;
     care_type: "first_aid" | "medicine" | "natural";
+    injury_id: string;
     healing_roll?: number;
+    medicine_roll_id?: string;
+    constitution_roll_id?: string;
+    period_key?: string;
     session_key?: string;
+    case_session_id: string;
   },
 ): Promise<EngineOperation> {
   return request<EngineOperationWire>(
@@ -283,6 +290,7 @@ export function resolveCombat(
     weapon_key: string;
     rolled_damage: number;
     session_key?: string;
+    case_session_id: string;
   },
 ): Promise<EngineOperation> {
   return request<EngineOperationWire>(`/campaigns/${campaignId}/combat/resolve`, {
@@ -303,6 +311,7 @@ export function createChase(
   payload: {
     title: string;
     session_key?: string;
+    case_session_id?: string;
     participants: ChaseParticipant[];
   },
 ): Promise<Chase> {

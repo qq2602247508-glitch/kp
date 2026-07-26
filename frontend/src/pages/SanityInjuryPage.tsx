@@ -6,12 +6,14 @@ import {
   applyRecovery,
   applySanityLoss,
   listCampaigns,
+  listCaseEntries,
   listInvestigators,
   listRuleOperations,
   resolveRoll,
 } from "../api/client";
 import type {
   Campaign,
+  CaseEntry,
   EngineOperation,
   Investigator,
   RuleOperationLog,
@@ -34,10 +36,16 @@ export function SanityInjuryPage(): ReactElement {
   const [campaignId, setCampaignId] = useState("");
   const [investigators, setInvestigators] = useState<Investigator[]>([]);
   const [investigatorId, setInvestigatorId] = useState("");
+  const [sessions, setSessions] = useState<CaseEntry[]>([]);
+  const [caseSessionId, setCaseSessionId] = useState("");
   const [loss, setLoss] = useState(1);
   const [damage, setDamage] = useState(1);
   const [reason, setReason] = useState("现场冲击");
   const [sessionKey, setSessionKey] = useState("本次团务");
+  const [careType, setCareType] = useState<"first_aid" | "medicine" | "natural">("first_aid");
+  const [healingRoll, setHealingRoll] = useState(1);
+  const [periodKey, setPeriodKey] = useState("本日");
+  const [injuryId, setInjuryId] = useState("");
   const [logs, setLogs] = useState<RuleOperationLog[]>([]);
   const [latest, setLatest] = useState<EngineOperation | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -47,6 +55,14 @@ export function SanityInjuryPage(): ReactElement {
     () => investigators.find((item) => item.investigator_id === investigatorId),
     [investigatorId, investigators],
   );
+
+  const latestInjuryId = useMemo(() => {
+    const injury = [...logs].reverse().find(
+      (entry) => entry.operation_type === "injury" && entry.subject_id === investigatorId,
+    );
+    const value = injury?.output_data.injury_id;
+    return typeof value === "string" ? value : "";
+  }, [investigatorId, logs]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,14 +83,16 @@ export function SanityInjuryPage(): ReactElement {
     if (!campaignId) {
       setInvestigators([]);
       setLogs([]);
+      setSessions([]);
       return;
     }
     const controller = new AbortController();
     Promise.all([
       listInvestigators(campaignId, controller.signal),
       listRuleOperations(campaignId, controller.signal),
+      listCaseEntries(campaignId, "sessions", controller.signal),
     ])
-      .then(([people, entries]) => {
+      .then(([people, entries, sessionEntries]) => {
         setInvestigators(people);
         setInvestigatorId((current) =>
           people.some((item) => item.investigator_id === current)
@@ -82,6 +100,13 @@ export function SanityInjuryPage(): ReactElement {
             : people[0]?.investigator_id || "",
         );
         setLogs(entries);
+        setSessions(sessionEntries);
+        setCaseSessionId((current) =>
+          sessionEntries.some((entry) => entry.entity_id === current)
+            ? current
+            : sessionEntries[0]?.entity_id || "",
+        );
+        setInjuryId("");
       })
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -98,6 +123,15 @@ export function SanityInjuryPage(): ReactElement {
       setFailure("请先选择调查员。");
       return;
     }
+    if (!caseSessionId) {
+      setFailure("请先选择案件场次；规则操作必须归属到场次。");
+      return;
+    }
+    const resolvedInjuryId = injuryId || latestInjuryId;
+    if (action === "recovery" && !resolvedInjuryId) {
+      setFailure("请先记录并选择一条伤势，再进行恢复。");
+      return;
+    }
     setBusy(true);
     setFailure(null);
     try {
@@ -105,7 +139,9 @@ export function SanityInjuryPage(): ReactElement {
         action === "sanity" && loss >= 5
           ? await resolveRoll({
               campaign_id: campaignId,
+              case_session_id: caseSessionId,
               investigator_id: selected.investigator_id,
+              skill_key: "intelligence",
               label: "理智损失后的 INT 检定",
               target: selected.profile.characteristics.intelligence,
               difficulty: "regular",
@@ -119,7 +155,8 @@ export function SanityInjuryPage(): ReactElement {
               loss,
               reason,
               session_key: sessionKey,
-              intelligence_check_passed: intelligenceCheck?.passed,
+              case_session_id: caseSessionId,
+              intelligence_roll_id: intelligenceCheck?.roll_id,
             })
           : action === "injury"
             ? await applyInjury(campaignId, selected.investigator_id, {
@@ -127,13 +164,52 @@ export function SanityInjuryPage(): ReactElement {
                 damage,
                 reason,
                 session_key: sessionKey,
+                case_session_id: caseSessionId,
               })
             : await applyRecovery(campaignId, selected.investigator_id, {
                 expected_version: selected.version,
-                care_type: "first_aid",
+                care_type: careType,
+                injury_id: resolvedInjuryId,
+                healing_roll: careType === "first_aid" ? undefined : healingRoll,
+                period_key: careType === "natural" ? periodKey : undefined,
                 session_key: sessionKey,
+                case_session_id: caseSessionId,
+                ...(careType === "medicine"
+                  ? {
+                      medicine_roll_id: (
+                        await resolveRoll({
+                          campaign_id: campaignId,
+                          case_session_id: caseSessionId,
+                          investigator_id: selected.investigator_id,
+                          skill_key: "medicine",
+                          label: "医学恢复检定",
+                          target:
+                            selected.profile.skills.find((skill) => skill.skill_key === "medicine")
+                              ?.current_value ?? 1,
+                          difficulty: "regular",
+                          bonus_penalty: 0,
+                        })
+                      ).roll_id,
+                    }
+                  : careType === "natural"
+                    ? {
+                        constitution_roll_id: (
+                          await resolveRoll({
+                            campaign_id: campaignId,
+                            case_session_id: caseSessionId,
+                            investigator_id: selected.investigator_id,
+                            skill_key: "constitution",
+                            label: "自然恢复 CON 检定",
+                            target: selected.profile.characteristics.constitution,
+                            difficulty: "regular",
+                            bonus_penalty: 0,
+                          })
+                        ).roll_id,
+                      }
+                    : {}),
               });
       setLatest(result);
+      if (action === "injury" && result.injury_id) setInjuryId(result.injury_id);
       setInvestigators((items) =>
         items.map((item) =>
           item.investigator_id === result.investigator.investigator_id
@@ -149,6 +225,14 @@ export function SanityInjuryPage(): ReactElement {
     }
   }
 
+  function changeCampaign(nextCampaignId: string): void {
+    setCampaignId(nextCampaignId);
+    setInvestigatorId("");
+    setCaseSessionId("");
+    setInjuryId("");
+    setLatest(null);
+  }
+
   return (
     <section className="engine-workspace">
       <header className="workspace-toolbar">
@@ -159,7 +243,7 @@ export function SanityInjuryPage(): ReactElement {
         <div className="toolbar-controls">
           <label>
             调查
-            <select value={campaignId} onChange={(event) => setCampaignId(event.target.value)}>
+            <select value={campaignId} onChange={(event) => changeCampaign(event.target.value)}>
               <option value="">请选择</option>
               {campaigns.map((campaign) => (
                 <option key={campaign.campaign_id} value={campaign.campaign_id}>
@@ -197,6 +281,15 @@ export function SanityInjuryPage(): ReactElement {
               : "创建并选择调查员后可执行规则操作。"}
           </p>
           <label className="field">
+            <span>案件场次</span>
+            <select value={caseSessionId} onChange={(event) => setCaseSessionId(event.target.value)}>
+              <option value="">请选择</option>
+              {sessions.map((session) => (
+                <option key={session.entity_id} value={session.entity_id}>{session.title}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
             <span>团务／日记录键</span>
             <input value={sessionKey} onChange={(event) => setSessionKey(event.target.value)} />
           </label>
@@ -231,15 +324,29 @@ export function SanityInjuryPage(): ReactElement {
             <button disabled={busy || !selected} onClick={() => void execute("injury")} type="button">
               记录伤势
             </button>
-            <button
-              className="secondary-button"
-              disabled={busy || !selected}
-              onClick={() => void execute("recovery")}
-              type="button"
-            >
-              急救恢复
-            </button>
           </div>
+          <div className="engine-form-grid">
+            <label className="field">
+              <span>要恢复的伤势</span>
+              <select value={injuryId || latestInjuryId} onChange={(event) => setInjuryId(event.target.value)}>
+                <option value="">请选择伤势</option>
+                {latestInjuryId ? <option value={latestInjuryId}>最近伤势</option> : null}
+              </select>
+            </label>
+            <label className="field">
+              <span>恢复方式</span>
+              <select value={careType} onChange={(event) => setCareType(event.target.value as typeof careType)}>
+                <option value="first_aid">急救</option>
+                <option value="medicine">医学</option>
+                <option value="natural">自然恢复</option>
+              </select>
+            </label>
+            {careType !== "first_aid" ? <label className="field"><span>治疗 1D3（1–3）</span><input min="1" max="3" type="number" value={healingRoll} onChange={(event) => setHealingRoll(Number(event.target.value))} /></label> : null}
+            {careType === "natural" ? <label className="field"><span>恢复周期键</span><input value={periodKey} onChange={(event) => setPeriodKey(event.target.value)} /></label> : null}
+          </div>
+          <button className="secondary-button" disabled={busy || !selected || !caseSessionId} onClick={() => void execute("recovery")} type="button">
+            {careType === "first_aid" ? "急救恢复" : careType === "medicine" ? "医学恢复（掷医学）" : "自然恢复（掷 CON）"}
+          </button>
           {latest ? (
             <div className="citation-card">
               <strong>本次判定引用</strong>
