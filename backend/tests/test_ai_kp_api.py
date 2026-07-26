@@ -1,5 +1,7 @@
+from types import SimpleNamespace
 from typing import Any
 
+from coc_kp_assistant.application import ai_kp_service
 from coc_kp_assistant.application.ai_kp_service import AIKPOrchestrator
 from coc_kp_assistant.domain.ai_kp import (
     AIKPDraft,
@@ -62,11 +64,67 @@ def test_ai_kp_endpoints_fail_503_when_local_model_is_unavailable(client: Any) -
 
 def test_proposal_list_is_a_real_empty_collection(client: Any) -> None:
     campaign = _campaign(client)
-    response = client.get(
-        f"/api/v1/campaigns/{campaign['campaign_id']}/ai-kp/proposals"
-    )
+    response = client.get(f"/api/v1/campaigns/{campaign['campaign_id']}/ai-kp/proposals")
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_ai_kp_rules_are_filtered_by_the_campaigns_effective_pack_selection(
+    client: Any, monkeypatch: Any
+) -> None:
+    campaign = _campaign(client)
+    campaign_id = campaign["campaign_id"]
+    optional = "coc7e.magic-compendium.zh-v1.1"
+    defaults = list(campaign["enabled_source_pack_ids"])
+    enabled = client.put(
+        f"/api/v1/campaigns/{campaign_id}/source-packs",
+        json={
+            "expected_version": campaign["version"],
+            "enabled_source_pack_ids": [*defaults, optional],
+        },
+    )
+    assert enabled.status_code == 200, enabled.text
+    disabled = client.put(
+        f"/api/v1/campaigns/{campaign_id}/source-packs",
+        json={
+            "expected_version": enabled.json()["campaign_version"],
+            "enabled_source_pack_ids": defaults,
+        },
+    )
+    assert disabled.status_code == 200, disabled.text
+
+    queries: list[Any] = []
+
+    class CapturingRulesService:
+        def search(self, query: Any) -> list[Any]:
+            queries.append(query)
+            return [
+                SimpleNamespace(
+                    citation_id="rule-1",
+                    excerpt="场景检定证据",
+                    score=1.0,
+                    source_pack=defaults[0],
+                    edition="7e",
+                    module="core",
+                    era=(),
+                    filename="core.pdf",
+                    page=88,
+                    section="技能检定",
+                    checksum="a" * 64,
+                )
+            ]
+
+    client.app.state.rules_service = CapturingRulesService()
+    client.app.state.ai_kp_orchestrator = None
+    monkeypatch.setattr(ai_kp_service, "OllamaAIKPProvider", lambda: FakeProvider())
+    asked = client.post(
+        f"/api/v1/campaigns/{campaign_id}/ai-kp/ask",
+        json={"question": "下一幕如何推进？", "mode": "scenario_draft"},
+    )
+    assert asked.status_code == 200, asked.text
+    assert len(queries) == 1
+    assert set(queries[0].source_pack_ids) == set(defaults)
+    assert optional not in queries[0].source_pack_ids
 
 
 def test_ai_proposal_api_requires_explicit_confirmation_before_case_write(
@@ -76,7 +134,7 @@ def test_ai_proposal_api_requires_explicit_confirmation_before_case_write(
     campaign_id = campaign["campaign_id"]
     client.app.state.ai_kp_orchestrator = AIKPOrchestrator(
         provider=FakeProvider(),
-        rules_reader=lambda _: [
+        rules_reader=lambda _, __: [
             {
                 "citation_id": "rule-1",
                 "excerpt": "场景检定证据",
@@ -96,19 +154,14 @@ def test_ai_proposal_api_requires_explicit_confirmation_before_case_write(
     assert proposal["status"] == "pending"
     assert proposal["is_expired"] is False
     assert proposal["expires_at"]
-    before = client.get(
-        f"/api/v1/campaigns/{campaign_id}/case-state/scenes"
-    )
+    before = client.get(f"/api/v1/campaigns/{campaign_id}/case-state/scenes")
     assert before.json() == []
 
     confirmed = client.post(
-        f"/api/v1/campaigns/{campaign_id}/ai-kp/proposals/"
-        f"{proposal['proposal_id']}/decision",
+        f"/api/v1/campaigns/{campaign_id}/ai-kp/proposals/{proposal['proposal_id']}/decision",
         json={"expected_version": 1, "decision": "confirm"},
     )
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["status"] == "confirmed"
-    after = client.get(
-        f"/api/v1/campaigns/{campaign_id}/case-state/scenes"
-    )
+    after = client.get(f"/api/v1/campaigns/{campaign_id}/case-state/scenes")
     assert [item["title"] for item in after.json()] == ["封闭仓库"]

@@ -8,7 +8,7 @@ def campaign_payload() -> dict[str, object]:
         "title": "雾港疑案",
         "era": "1920s",
         "starting_location": "雾港",
-        "enabled_source_pack_ids": ["coc7-core-zh-v1.2.1"],
+        "enabled_source_pack_ids": ["coc7e.core.zh-v1.2.1"],
         "house_rules": [],
     }
 

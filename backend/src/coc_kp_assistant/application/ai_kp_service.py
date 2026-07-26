@@ -200,6 +200,7 @@ class AIKPOrchestrator:
         *,
         provider: AIKPProvider,
         rules_reader: Any,
+        source_pack_resolver: Any | None = None,
         registry: ReadOnlyToolRegistry | None = None,
         proposal_ttl_minutes: int = 60,
     ) -> None:
@@ -207,6 +208,7 @@ class AIKPOrchestrator:
             raise ValueError("proposal TTL must be positive")
         self.provider = provider
         self.rules_reader = rules_reader
+        self.source_pack_resolver = source_pack_resolver
         self.registry = registry or ReadOnlyToolRegistry()
         self.proposal_ttl = timedelta(minutes=proposal_ttl_minutes)
 
@@ -218,7 +220,14 @@ class AIKPOrchestrator:
     ) -> AIKPResponse:
         campaign = service.get_campaign(session, campaign_id)
         try:
-            evidence = list(self.rules_reader(request.question))
+            source_pack_ids = (
+                tuple(self.source_pack_resolver(session, campaign_id))
+                if self.source_pack_resolver is not None
+                else tuple(campaign.enabled_source_pack_ids)
+            )
+            if not source_pack_ids:
+                raise ValueError("campaign has no effective COC7 source packs")
+            evidence = list(self.rules_reader(request.question, source_pack_ids))
         except Exception as error:
             raise AIKPUnavailableError("local rules evidence is unavailable") from error
         evidence_by_id = {

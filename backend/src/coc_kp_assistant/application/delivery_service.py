@@ -2,18 +2,45 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import shutil
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import httpx
-from sqlalchemy import DateTime, Engine, insert, select, text
+from pydantic import ValidationError
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Engine,
+    Integer,
+    String,
+    Text,
+    insert,
+    select,
+    text,
+    update,
+)
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
+from coc_kp_assistant.api.schemas import ChaseParticipantState
 from coc_kp_assistant.config import Settings
+from coc_kp_assistant.domain import SourcePackManifest
+from coc_kp_assistant.domain.campaigns import CampaignCreate, CampaignEra
+from coc_kp_assistant.domain.investigators import (
+    CoreCharacteristics,
+    InvestigatorBackstory,
+    InvestigatorCondition,
+    InvestigatorCreate,
+    InvestigatorState,
+    SkillEntry,
+)
+from coc_kp_assistant.domain.rolls import RollRequest, RollResolution, resolve_percentile_roll
 from coc_kp_assistant.infrastructure.models import (
     Base,
     CampaignRecord,
@@ -185,26 +212,36 @@ def _catalog_packs(settings: Settings) -> list[dict[str, Any]]:
         manifest = raw.get("manifest") if isinstance(raw, dict) else None
         if not isinstance(manifest, dict):
             raise DeliveryValidationError("COC7 source pack manifest is invalid")
-        pack_id = manifest.get("pack_id")
-        if (
-            not isinstance(pack_id, str)
-            or not pack_id.startswith(("coc7e.", "coc-classic."))
-            or pack_id in seen
-        ):
+        required_fields = {
+            "pack_id",
+            "title",
+            "version",
+            "edition",
+            "kind",
+            "priority",
+            "default_enabled",
+            "eras",
+        }
+        if not required_fields.issubset(manifest):
+            raise DeliveryValidationError("COC7 source pack manifest is incomplete")
+        try:
+            parsed = SourcePackManifest.model_validate(manifest)
+        except ValidationError as error:
+            raise DeliveryValidationError("COC7 source pack manifest is invalid") from error
+        pack_id = parsed.pack_id
+        if pack_id in seen:
             raise DeliveryValidationError("COC7 source pack identity is invalid")
         seen.add(pack_id)
         packs.append(
             {
                 "pack_id": pack_id,
-                "title": str(manifest.get("title", pack_id)),
-                "version": str(manifest.get("version", "")),
-                "edition": str(manifest.get("edition", "")),
-                "kind": str(manifest.get("kind", "")),
-                "default_enabled": bool(manifest.get("default_enabled", False)),
-                "eras": [
-                    str(era) for era in manifest.get("eras", []) if isinstance(era, str)
-                ],
-                "priority": int(manifest.get("priority", 100)),
+                "title": parsed.title,
+                "version": parsed.version,
+                "edition": parsed.edition,
+                "kind": parsed.kind.value,
+                "default_enabled": parsed.default_enabled,
+                "eras": list(parsed.eras),
+                "priority": parsed.priority,
                 "legacy_namespace": pack_id.startswith("coc-classic."),
             }
         )
@@ -216,9 +253,7 @@ def _compatible(pack: dict[str, Any], era: str) -> bool:
         return False
     eras = pack["eras"]
     normalized_era = era.replace("_", "-")
-    return not eras or normalized_era in {
-        str(item).replace("_", "-") for item in eras
-    }
+    return not eras or normalized_era in {str(item).replace("_", "-") for item in eras}
 
 
 def campaign_source_packs(
@@ -228,12 +263,18 @@ def campaign_source_packs(
     if campaign is None:
         raise DeliveryValidationError("campaign not found")
     packs = _catalog_packs(settings)
+    by_id = {pack["pack_id"]: pack for pack in packs}
+    stored = set(campaign.enabled_source_pack_ids)
+    if stored - set(by_id) or any(
+        not _compatible(by_id[pack_id], campaign.era) for pack_id in stored
+    ):
+        raise DeliveryValidationError("campaign contains invalid stored source packs")
     required = {
         pack["pack_id"]
         for pack in packs
         if pack["default_enabled"] and _compatible(pack, campaign.era)
     }
-    enabled = set(campaign.enabled_source_pack_ids) | required
+    enabled = stored | required
     return {
         "campaign_id": campaign.id,
         "campaign_version": campaign.version,
@@ -250,6 +291,29 @@ def campaign_source_packs(
     }
 
 
+def validated_campaign_source_pack_ids(
+    settings: Settings, era: CampaignEra | str, requested_ids: list[str]
+) -> list[str]:
+    era_value = era.value if isinstance(era, CampaignEra) else CampaignEra(era).value
+    packs = _catalog_packs(settings)
+    by_id = {pack["pack_id"]: pack for pack in packs}
+    requested = set(requested_ids)
+    unknown = requested - set(by_id)
+    if unknown:
+        raise DeliveryValidationError("unknown COC7 source pack: " + ", ".join(sorted(unknown)))
+    incompatible = {pack_id for pack_id in requested if not _compatible(by_id[pack_id], era_value)}
+    if incompatible:
+        raise DeliveryValidationError(
+            "source pack is incompatible with campaign era: " + ", ".join(sorted(incompatible))
+        )
+    required = {
+        pack["pack_id"]
+        for pack in packs
+        if pack["default_enabled"] and _compatible(pack, era_value)
+    }
+    return sorted(requested | required)
+
+
 def replace_campaign_source_packs(
     session: Session,
     settings: Settings,
@@ -261,32 +325,27 @@ def replace_campaign_source_packs(
     campaign = session.get(CampaignRecord, str(campaign_id))
     if campaign is None:
         raise DeliveryValidationError("campaign not found")
-    if campaign.version != expected_version:
-        raise DeliveryConflictError("campaign version conflict")
-    packs = _catalog_packs(settings)
-    by_id = {pack["pack_id"]: pack for pack in packs}
-    requested = set(enabled_source_pack_ids)
-    unknown = requested - set(by_id)
-    if unknown:
-        raise DeliveryValidationError("unknown COC7 source pack: " + ", ".join(sorted(unknown)))
-    incompatible = {
-        pack_id
-        for pack_id in requested
-        if not _compatible(by_id[pack_id], campaign.era)
-    }
-    if incompatible:
-        raise DeliveryValidationError(
-            "source pack is incompatible with campaign era: "
-            + ", ".join(sorted(incompatible))
-        )
-    required = {
-        pack["pack_id"]
-        for pack in packs
-        if pack["default_enabled"] and _compatible(pack, campaign.era)
-    }
     before_pack_ids = list(campaign.enabled_source_pack_ids)
-    campaign.enabled_source_pack_ids = sorted(requested | required)
-    campaign.version += 1
+    after_pack_ids = validated_campaign_source_pack_ids(
+        settings, campaign.era, enabled_source_pack_ids
+    )
+    result = cast(
+        CursorResult[Any],
+        session.execute(
+            update(CampaignRecord)
+            .where(
+                CampaignRecord.id == str(campaign_id),
+                CampaignRecord.version == expected_version,
+            )
+            .values(
+                enabled_source_pack_ids=after_pack_ids,
+                version=expected_version + 1,
+            )
+        ),
+    )
+    if result.rowcount != 1:
+        session.rollback()
+        raise DeliveryConflictError("campaign version conflict")
     session.add(
         StateAuditRecord(
             campaign_id=campaign.id,
@@ -295,9 +354,7 @@ def replace_campaign_source_packs(
             entity_id=campaign.id,
             expected_version=expected_version,
             before_data={"enabled_source_pack_ids": before_pack_ids},
-            after_data={
-                "enabled_source_pack_ids": list(campaign.enabled_source_pack_ids)
-            },
+            after_data={"enabled_source_pack_ids": after_pack_ids},
         )
     )
     session.commit()
@@ -375,7 +432,415 @@ def _validate_uuid(value: Any, label: str) -> str:
     return value
 
 
-def _validated_import(bundle: dict[str, Any]) -> tuple[str, dict[str, list[dict[str, Any]]]]:
+def _validate_json_value(value: Any, label: str) -> None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise DeliveryValidationError(f"{label} contains a non-finite number")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_json_value(item, f"{label}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise DeliveryValidationError(f"{label} contains a non-string key")
+            _validate_json_value(item, f"{label}.{key}")
+        return
+    raise DeliveryValidationError(f"{label} is not valid JSON")
+
+
+def _validate_database_row(table_name: str, row: dict[str, Any]) -> None:
+    table = Base.metadata.tables[table_name]
+    expected_columns = set(table.c.keys())
+    if set(row) != expected_columns:
+        raise DeliveryValidationError(
+            f"{table_name} must contain exactly the exported database columns"
+        )
+    for column in table.c:
+        label = f"{table_name}.{column.name}"
+        value = row[column.name]
+        if value is None:
+            if not column.nullable:
+                raise DeliveryValidationError(f"{label} cannot be null")
+            continue
+        if isinstance(column.type, Boolean):
+            if not isinstance(value, bool):
+                raise DeliveryValidationError(f"{label} must be a boolean")
+        elif isinstance(column.type, Integer):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise DeliveryValidationError(f"{label} must be an integer")
+        elif isinstance(column.type, DateTime):
+            if not isinstance(value, str):
+                raise DeliveryValidationError(f"{label} must be an ISO datetime")
+            try:
+                parsed = datetime.fromisoformat(value)
+            except ValueError as error:
+                raise DeliveryValidationError(f"{label} must be an ISO datetime") from error
+            if parsed.tzinfo is None:
+                raise DeliveryValidationError(f"{label} must include a timezone")
+        elif isinstance(column.type, (String, Text)):
+            if not isinstance(value, str):
+                raise DeliveryValidationError(f"{label} must be a string")
+            if isinstance(column.type, String) and column.type.length is not None:
+                if len(value) > column.type.length:
+                    raise DeliveryValidationError(f"{label} exceeds its maximum length")
+                if column.type.length == 36:
+                    _validate_uuid(value, label)
+        elif isinstance(column.type, JSON):
+            _validate_json_value(value, label)
+
+
+def _require_string_list(value: Any, label: str, *, max_length: int = 2_000) -> list[str]:
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or len(item) > max_length for item in value
+    ):
+        raise DeliveryValidationError(f"{label} must be an array of bounded strings")
+    return value
+
+
+def _validate_import_semantics(
+    validated: dict[str, list[dict[str, Any]]],
+    campaign_id: str,
+    settings: Settings,
+) -> None:
+    campaign = validated["campaigns"][0]
+    try:
+        CampaignCreate.model_validate(
+            {
+                "title": campaign["title"],
+                "ruleset": campaign["ruleset"],
+                "era": campaign["era"],
+                "custom_era_label": campaign["custom_era_label"],
+                "in_world_date": campaign["in_world_date"],
+                "starting_location": campaign["starting_location"],
+                "enabled_source_pack_ids": campaign["enabled_source_pack_ids"],
+                "house_rules": campaign["house_rules"],
+                "keeper_notes": campaign["keeper_notes"],
+            },
+        )
+    except ValidationError as error:
+        raise DeliveryValidationError("campaign contains invalid COC7 domain data") from error
+    if isinstance(campaign["version"], bool) or campaign["version"] < 1:
+        raise DeliveryValidationError("campaign.version must be positive")
+    _require_string_list(
+        campaign["enabled_source_pack_ids"],
+        "campaign.enabled_source_pack_ids",
+        max_length=80,
+    )
+    _require_string_list(campaign["house_rules"], "campaign.house_rules", max_length=2_000)
+
+    catalog = _catalog_packs(settings)
+    by_id = {item["pack_id"]: item for item in catalog}
+    requested = set(campaign["enabled_source_pack_ids"])
+    if requested - set(by_id):
+        raise DeliveryValidationError("campaign enables an unknown source pack")
+    era = CampaignEra(campaign["era"]).value
+    if any(not _compatible(by_id[pack_id], era) for pack_id in requested):
+        raise DeliveryValidationError("campaign enables an era-incompatible source pack")
+    required = {
+        item["pack_id"] for item in catalog if item["default_enabled"] and _compatible(item, era)
+    }
+    if not required.issubset(requested):
+        raise DeliveryValidationError("campaign omits a required default source pack")
+
+    skills_by_investigator: dict[str, list[dict[str, Any]]] = {}
+    for skill in validated["investigator_skills"]:
+        skills_by_investigator.setdefault(skill["investigator_id"], []).append(skill)
+        if skill["specialization_key"] != (skill["specialization"] or ""):
+            raise DeliveryValidationError("investigator skill specialization identity is invalid")
+    backstory_by_investigator = {
+        item["investigator_id"]: item for item in validated["investigator_backstories"]
+    }
+    if len(backstory_by_investigator) != len(validated["investigator_backstories"]):
+        raise DeliveryValidationError("investigator backstories contain duplicates")
+    if set(backstory_by_investigator) != {item["id"] for item in validated["investigators"]}:
+        raise DeliveryValidationError("every investigator must have exactly one backstory")
+    for investigator in validated["investigators"]:
+        backstory_row = backstory_by_investigator[investigator["id"]]
+        backstory_payload = {
+            key: _require_string_list(value, f"investigator_backstories.{key}")
+            for key, value in backstory_row.items()
+            if key != "investigator_id"
+        }
+        skill_payloads = []
+        for skill in skills_by_investigator.get(investigator["id"], []):
+            if (
+                skill["source_pack_id"] is not None
+                and skill["source_pack_id"] not in requested
+            ):
+                raise DeliveryValidationError(
+                    "investigator skill references a disabled source pack"
+                )
+            skill_payloads.append(
+                {
+                    "skill_key": skill["skill_key"],
+                    "display_name": skill["display_name"],
+                    "specialization": skill["specialization"],
+                    "base_value": skill["base_value"],
+                    "current_value": skill["current_value"],
+                    "improvement_mark": skill["improvement_mark"],
+                    "source_pack_id": skill["source_pack_id"],
+                }
+            )
+        try:
+            profile = InvestigatorCreate(
+                name=investigator["name"],
+                player_name=investigator["player_name"],
+                occupation=investigator["occupation"],
+                age=investigator["age"],
+                gender=investigator["gender"],
+                residence=investigator["residence"],
+                birthplace=investigator["birthplace"],
+                era=investigator["era"],
+                characteristics=CoreCharacteristics(
+                    strength=investigator["strength"],
+                    constitution=investigator["constitution"],
+                    size=investigator["size"],
+                    dexterity=investigator["dexterity"],
+                    appearance=investigator["appearance"],
+                    intelligence=investigator["intelligence"],
+                    power=investigator["power"],
+                    education=investigator["education"],
+                ),
+                luck=investigator["luck"],
+                move_rate=investigator["move_rate"],
+                damage_bonus=investigator["damage_bonus"],
+                build=investigator["build"],
+                credit_rating=investigator["credit_rating"],
+                spending_level=investigator["spending_level"],
+                cash=investigator["cash"],
+                assets=investigator["assets"],
+                skills=tuple(SkillEntry.model_validate(item) for item in skill_payloads),
+                backstory=InvestigatorBackstory.model_validate(backstory_payload),
+            )
+            InvestigatorState(
+                investigator_id=UUID(investigator["id"]),
+                campaign_id=UUID(campaign_id),
+                profile=profile,
+                hit_points=investigator["hit_points"],
+                magic_points=investigator["magic_points"],
+                sanity=investigator["sanity"],
+                mythos=investigator["mythos"],
+                conditions=frozenset(
+                    InvestigatorCondition(item)
+                    for item in _require_string_list(
+                        investigator["conditions"], "investigator.conditions", max_length=40
+                    )
+                ),
+                version=investigator["version"],
+            )
+        except (ValidationError, ValueError) as error:
+            raise DeliveryValidationError(
+                "investigator contains invalid COC7 domain data"
+            ) from error
+
+    case_tables = (
+        "case_sessions",
+        "case_people",
+        "case_locations",
+        "case_scenes",
+        "case_clues",
+        "case_relationships",
+        "case_handouts",
+        "case_timeline_events",
+    )
+    valid_case_statuses = {
+        "planned",
+        "active",
+        "inactive",
+        "draft",
+        "complete",
+        "completed",
+        "discovered",
+        "revealed",
+        "archived",
+    }
+    for table_name in case_tables:
+        for row in validated[table_name]:
+            if not row["title"].strip() or row["status"] not in valid_case_statuses:
+                raise DeliveryValidationError(f"{table_name} contains invalid title/status")
+            if row["version"] < 1:
+                raise DeliveryValidationError(f"{table_name}.version must be positive")
+    for relationship in validated["case_relationships"]:
+        if relationship["source_clue_id"] == relationship["target_clue_id"]:
+            raise DeliveryValidationError("case relationship cannot point to itself")
+
+    for roll in validated["roll_records"]:
+        if not roll["label"].strip():
+            raise DeliveryValidationError("roll label cannot be empty")
+        try:
+            request = RollRequest.model_validate(roll["request_data"])
+            resolution = RollResolution.model_validate(roll["resolution_data"])
+        except ValidationError as error:
+            raise DeliveryValidationError(
+                "roll record contains invalid deterministic data"
+            ) from error
+        if resolution != resolve_percentile_roll(request):
+            raise DeliveryValidationError("roll resolution does not match its request")
+
+    for operation in validated["rule_operation_logs"]:
+        if not operation["operation_type"].strip():
+            raise DeliveryValidationError("rule operation type cannot be empty")
+        valid_operation_subjects = {item["id"] for item in validated["investigators"]} | {
+            item["id"] for item in validated["chases"]
+        }
+        if operation["subject_id"] not in valid_operation_subjects:
+            raise DeliveryValidationError("rule operation subject is outside the campaign")
+        for field in ("input_data", "output_data", "citation_data"):
+            if not isinstance(operation[field], dict):
+                raise DeliveryValidationError(f"rule operation {field} must be an object")
+
+    for chase in validated["chases"]:
+        if (
+            not chase["title"].strip()
+            or chase["status"] not in {"active", "caught", "escaped"}
+            or chase["round"] < 1
+            or chase["escape_distance"] < 1
+            or chase["track_length"] < 1
+            or chase["escape_distance"] > chase["track_length"]
+            or chase["version"] < 1
+            or not isinstance(chase["participants"], list)
+            or not 2 <= len(chase["participants"]) <= 20
+        ):
+            raise DeliveryValidationError("chase contains invalid COC7 state")
+        try:
+            participants = [
+                ChaseParticipantState.model_validate(item) for item in chase["participants"]
+            ]
+        except ValidationError as error:
+            raise DeliveryValidationError("chase participants are invalid") from error
+        if len({item.investigator_id for item in participants}) != len(participants):
+            raise DeliveryValidationError("chase participants must be unique")
+        investigator_ids = {item["id"] for item in validated["investigators"]}
+        if any(str(item.investigator_id) not in investigator_ids for item in participants):
+            raise DeliveryValidationError("chase participant is not an investigator")
+        if any(item.position > chase["track_length"] for item in participants):
+            raise DeliveryValidationError("chase participant exceeds the track")
+
+    for proposal in validated["ai_proposals"]:
+        if (
+            proposal["proposal_type"] not in {"case_state_create", "case_state_replace"}
+            or proposal["case_kind"]
+            not in {
+                "sessions",
+                "people",
+                "locations",
+                "scenes",
+                "clues",
+                "relationships",
+                "handouts",
+                "timeline-events",
+            }
+            or proposal["status"] not in {"pending", "confirmed", "rejected"}
+            or proposal["campaign_version"] < 1
+            or proposal["version"] < 1
+            or not isinstance(proposal["payload"], dict)
+            or not isinstance(proposal["model_metadata"], dict)
+            or not isinstance(proposal["evidence"], list)
+            or any(not isinstance(item, dict) for item in proposal["evidence"])
+            or proposal["model_name"] != COMPLETION_MODEL
+        ):
+            raise DeliveryValidationError("AI proposal contains invalid state")
+        citation_ids = _require_string_list(
+            proposal["citation_ids"], "ai_proposals.citation_ids"
+        )
+        for citation_id in citation_ids:
+            _validate_uuid(citation_id, "ai_proposals.citation_ids")
+        if proposal["proposal_type"] == "case_state_create" and (
+            proposal["target_entity_id"] is not None or proposal["target_version"] is not None
+        ):
+            raise DeliveryValidationError("create proposal cannot target an entity")
+        if proposal["proposal_type"] == "case_state_replace" and (
+            proposal["target_entity_id"] is None
+            or proposal["target_version"] is None
+            or proposal["target_version"] < 1
+        ):
+            raise DeliveryValidationError("replace proposal target is invalid")
+        table_for_kind = {
+            "sessions": "case_sessions",
+            "people": "case_people",
+            "locations": "case_locations",
+            "scenes": "case_scenes",
+            "clues": "case_clues",
+            "relationships": "case_relationships",
+            "handouts": "case_handouts",
+            "timeline-events": "case_timeline_events",
+        }[proposal["case_kind"]]
+        target_ids = {item["id"] for item in validated[table_for_kind]}
+        if (
+            proposal["target_entity_id"] is not None
+            and proposal["target_entity_id"] not in target_ids
+        ):
+            raise DeliveryValidationError("AI proposal target is outside its case kind")
+        if (
+            proposal["applied_entity_id"] is not None
+            and proposal["applied_entity_id"] not in target_ids
+        ):
+            raise DeliveryValidationError("AI proposal applied entity is outside its case kind")
+        created_at = datetime.fromisoformat(proposal["created_at"])
+        expires_at = datetime.fromisoformat(proposal["expires_at"])
+        resolved_at = (
+            datetime.fromisoformat(proposal["resolved_at"])
+            if proposal["resolved_at"] is not None
+            else None
+        )
+        if expires_at <= created_at:
+            raise DeliveryValidationError("AI proposal expiry is invalid")
+        if proposal["status"] == "pending" and (
+            resolved_at is not None
+            or proposal["rejection_reason"] is not None
+            or proposal["applied_entity_id"] is not None
+        ):
+            raise DeliveryValidationError("pending AI proposal contains resolved state")
+        if proposal["status"] == "confirmed" and (
+            resolved_at is None
+            or proposal["applied_entity_id"] is None
+            or proposal["rejection_reason"] is not None
+        ):
+            raise DeliveryValidationError("confirmed AI proposal state is incomplete")
+        if proposal["status"] == "rejected" and (
+            resolved_at is None
+            or proposal["applied_entity_id"] is not None
+            or not (proposal["rejection_reason"] or "").strip()
+        ):
+            raise DeliveryValidationError("rejected AI proposal state is incomplete")
+    for audit in validated["proposal_audits"]:
+        if audit["action"] not in {"confirm", "reject"}:
+            raise DeliveryValidationError("proposal audit action is invalid")
+        if (
+            audit["expected_version"] < 1
+            or not isinstance(audit["before_data"], dict)
+            or not isinstance(audit["after_data"], dict)
+        ):
+            raise DeliveryValidationError("proposal audit state is invalid")
+    for audit in validated["state_audits"]:
+        if not audit["action"].strip() or not audit["entity_type"].strip():
+            raise DeliveryValidationError("state audit identity is invalid")
+        if audit["expected_version"] is not None and audit["expected_version"] < 1:
+            raise DeliveryValidationError("state audit version is invalid")
+        if audit["before_data"] is not None and not isinstance(audit["before_data"], dict):
+            raise DeliveryValidationError("state audit before_data must be an object")
+        if audit["after_data"] is not None and not isinstance(audit["after_data"], dict):
+            raise DeliveryValidationError("state audit after_data must be an object")
+
+
+def _validated_import(
+    bundle: dict[str, Any], settings: Settings
+) -> tuple[str, dict[str, list[dict[str, Any]]]]:
+    expected_bundle_keys = {
+        "product",
+        "ruleset",
+        "schema_version",
+        "namespace",
+        "exported_at",
+        "campaign_id",
+        "tables",
+    }
+    if set(bundle) != expected_bundle_keys:
+        raise DeliveryValidationError("export bundle contains missing or unknown fields")
     if bundle.get("product") != PRODUCT_NAMESPACE:
         raise DeliveryValidationError("export product namespace is not local-coc-kp-assistant")
     if bundle.get("ruleset") != RULESET_NAMESPACE:
@@ -384,6 +849,15 @@ def _validated_import(bundle: dict[str, Any]) -> tuple[str, dict[str, list[dict[
         raise DeliveryValidationError("unsupported export schema version")
     if bundle.get("namespace") != f"{PRODUCT_NAMESPACE}/{RULESET_NAMESPACE}":
         raise DeliveryValidationError("export namespace is invalid")
+    exported_at = bundle.get("exported_at")
+    if not isinstance(exported_at, str):
+        raise DeliveryValidationError("exported_at must be an ISO datetime")
+    try:
+        parsed_exported_at = datetime.fromisoformat(exported_at)
+    except ValueError as error:
+        raise DeliveryValidationError("exported_at must be an ISO datetime") from error
+    if parsed_exported_at.tzinfo is None:
+        raise DeliveryValidationError("exported_at must include a timezone")
     campaign_id = _validate_uuid(bundle.get("campaign_id"), "campaign_id")
     tables = bundle.get("tables")
     if not isinstance(tables, dict) or set(tables) != set(EXPORT_TABLES):
@@ -397,11 +871,11 @@ def _validated_import(bundle: dict[str, Any]) -> tuple[str, dict[str, list[dict[
             raise DeliveryValidationError(f"{table_name} must be an array")
         rows: list[dict[str, Any]] = []
         ids: set[str] = set()
-        allowed_columns = set(table.c.keys())
         for raw_row in raw_rows:
-            if not isinstance(raw_row, dict) or set(raw_row) - allowed_columns:
-                raise DeliveryValidationError(f"{table_name} contains unknown columns")
+            if not isinstance(raw_row, dict):
+                raise DeliveryValidationError(f"{table_name} rows must be objects")
             row = dict(raw_row)
+            _validate_database_row(table_name, row)
             if "ruleset" in table.c and row.get("ruleset") != RULESET_NAMESPACE:
                 raise DeliveryValidationError(f"{table_name} contains a foreign ruleset")
             if "campaign_id" in table.c and row.get("campaign_id") not in {
@@ -449,11 +923,12 @@ def _validated_import(bundle: dict[str, Any]) -> tuple[str, dict[str, list[dict[
                         raise DeliveryValidationError(
                             f"{table_name}.{column.name} contains an invalid reference"
                         )
+    _validate_import_semantics(validated, campaign_id, settings)
     return campaign_id, validated
 
 
-def import_campaign(session: Session, bundle: dict[str, Any]) -> str:
-    campaign_id, tables = _validated_import(bundle)
+def import_campaign(session: Session, settings: Settings, bundle: dict[str, Any]) -> str:
+    campaign_id, tables = _validated_import(bundle, settings)
     if session.get(CampaignRecord, campaign_id) is not None:
         raise DeliveryConflictError("campaign already exists; overwrite is disabled")
     try:
@@ -467,6 +942,20 @@ def import_campaign(session: Session, bundle: dict[str, Any]) -> str:
                     if isinstance(column.type, DateTime) and isinstance(value, str):
                         converted[column.name] = datetime.fromisoformat(value)
                 session.execute(insert(table).values(**converted))
+        session.add(
+            StateAuditRecord(
+                campaign_id=campaign_id,
+                action="import_campaign",
+                entity_type="campaign",
+                entity_id=campaign_id,
+                before_data=None,
+                after_data={
+                    "product": PRODUCT_NAMESPACE,
+                    "ruleset": RULESET_NAMESPACE,
+                    "schema_version": EXPORT_SCHEMA_VERSION,
+                },
+            )
+        )
         session.commit()
     except DeliveryValidationError:
         raise
@@ -503,6 +992,16 @@ def _snapshot_files(root: Path) -> list[Path]:
     return sorted(files)
 
 
+def _reject_symlink_components(path: Path, label: str) -> Path:
+    lexical = path.expanduser()
+    if not lexical.is_absolute():
+        lexical = Path.cwd() / lexical
+    for component in reversed((lexical, *lexical.parents)):
+        if component.is_symlink():
+            raise DeliveryValidationError(f"{label} cannot contain symbolic links")
+    return lexical.resolve()
+
+
 def create_backup(
     engine: Engine, settings: Settings, destination: str | None = None
 ) -> dict[str, Any]:
@@ -526,19 +1025,20 @@ def create_backup(
 
         vector_destination = staging / "vector-index"
         vector_files_before: dict[str, str] = {}
-        if settings.vector_root.is_dir():
-            for source_file in _snapshot_files(settings.vector_root):
-                vector_files_before[str(source_file.relative_to(settings.vector_root))] = _sha256(
+        vector_root = _reject_symlink_components(settings.vector_root, "vector index")
+        if vector_root.is_dir():
+            for source_file in _snapshot_files(vector_root):
+                vector_files_before[str(source_file.relative_to(vector_root))] = _sha256(
                     source_file
                 )
-            shutil.copytree(settings.vector_root, vector_destination)
+            shutil.copytree(vector_root, vector_destination)
             vector_files_after = {
                 str(source_file.relative_to(vector_destination)): _sha256(source_file)
                 for source_file in _snapshot_files(vector_destination)
             }
             current_source = {
-                str(source_file.relative_to(settings.vector_root)): _sha256(source_file)
-                for source_file in _snapshot_files(settings.vector_root)
+                str(source_file.relative_to(vector_root)): _sha256(source_file)
+                for source_file in _snapshot_files(vector_root)
             }
             if vector_files_before != vector_files_after or vector_files_before != current_source:
                 raise DeliveryConflictError("vector index changed during backup; retry")
@@ -570,10 +1070,13 @@ def create_backup(
 
 def verify_backup(path_value: str) -> dict[str, Any]:
     path = Path(path_value).expanduser()
-    if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+    if not path.is_absolute() or not path.is_dir():
         raise DeliveryValidationError("backup path must be an absolute non-symlink directory")
-    root = path.resolve()
-    manifest = _read_json(root / "manifest.json")
+    root = _reject_symlink_components(path, "backup path")
+    manifest_path = root / "manifest.json"
+    if manifest_path.is_symlink():
+        raise DeliveryValidationError("backup manifest cannot be a symbolic link")
+    manifest = _read_json(manifest_path)
     if (
         manifest is None
         or manifest.get("product") != PRODUCT_NAMESPACE
@@ -584,21 +1087,33 @@ def verify_backup(path_value: str) -> dict[str, Any]:
     files = manifest.get("files")
     if not isinstance(files, dict):
         raise DeliveryValidationError("backup checksum manifest is invalid")
-    mismatches: list[str] = []
+    expected_files: dict[str, str] = {}
     for relative, expected in files.items():
         if (
             not isinstance(relative, str)
             or Path(relative).is_absolute()
             or ".." in Path(relative).parts
             or not isinstance(expected, str)
+            or len(expected) != 64
+            or any(character not in "0123456789abcdef" for character in expected)
+            or relative == "manifest.json"
         ):
             raise DeliveryValidationError("backup checksum path is unsafe")
+        expected_files[relative] = expected
+    actual_files: dict[str, Path] = {}
+    for candidate in root.rglob("*"):
+        if candidate.is_symlink():
+            raise DeliveryValidationError("backup cannot contain symbolic links")
+        if candidate.is_file() and candidate != manifest_path:
+            actual_files[str(candidate.relative_to(root))] = candidate
+    expected_names = set(expected_files)
+    actual_names = set(actual_files)
+    mismatches = sorted(expected_names ^ actual_names)
+    for relative in sorted(expected_names & actual_names):
         candidate = root / relative
         if (
-            candidate.is_symlink()
-            or not candidate.is_file()
-            or not candidate.resolve().is_relative_to(root)
-            or _sha256(candidate) != expected
+            not candidate.resolve().is_relative_to(root)
+            or _sha256(candidate) != expected_files[relative]
         ):
             mismatches.append(relative)
     return {

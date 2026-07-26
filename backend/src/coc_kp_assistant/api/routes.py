@@ -96,8 +96,16 @@ def get_ai_kp_orchestrator(
     if existing is None:
         rules_service = get_rules_service(request)
 
-        def read_rules(question: str) -> list[dict[str, object]]:
-            citations = rules_service.search(RuleQuery(query=question, limit=8))
+        def read_rules(
+            question: str, source_pack_ids: tuple[str, ...]
+        ) -> list[dict[str, object]]:
+            citations = rules_service.search(
+                RuleQuery(
+                    query=question,
+                    source_pack_ids=source_pack_ids,
+                    limit=8,
+                )
+            )
             return [
                 {
                     "citation_id": item.citation_id,
@@ -118,6 +126,11 @@ def get_ai_kp_orchestrator(
         existing = ai_kp_service.AIKPOrchestrator(
             provider=ai_kp_service.OllamaAIKPProvider(),
             rules_reader=read_rules,
+            source_pack_resolver=lambda session, campaign_id: (
+                delivery_service.campaign_source_packs(
+                    session, request.app.state.settings, campaign_id
+                )["enabled_source_pack_ids"]
+            ),
             proposal_ttl_minutes=request.app.state.settings.ai_kp_proposal_ttl_minutes,
         )
         request.app.state.ai_kp_orchestrator = existing
@@ -148,29 +161,71 @@ def _rule_engine_error(error: Exception) -> HTTPException:
 
 
 @router.post("/campaigns", response_model=CampaignResponse, status_code=status.HTTP_201_CREATED)
-def create_campaign(payload: CampaignCreate, session: DatabaseSession) -> CampaignResponse:
-    return service.create_campaign(session, payload)
+def create_campaign(
+    payload: CampaignCreate, request: Request, session: DatabaseSession
+) -> CampaignResponse:
+    try:
+        enabled = delivery_service.validated_campaign_source_pack_ids(
+            request.app.state.settings,
+            payload.era,
+            list(payload.enabled_source_pack_ids),
+        )
+    except delivery_service.DeliveryValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return service.create_campaign(
+        session, payload.model_copy(update={"enabled_source_pack_ids": tuple(enabled)})
+    )
 
 
 @router.get("/campaigns", response_model=list[CampaignResponse])
-def list_campaigns(session: DatabaseSession) -> list[CampaignResponse]:
-    return service.list_campaigns(session)
+def list_campaigns(request: Request, session: DatabaseSession) -> list[CampaignResponse]:
+    campaigns = service.list_campaigns(session)
+    try:
+        for campaign in campaigns:
+            delivery_service.campaign_source_packs(
+                session, request.app.state.settings, campaign.campaign_id
+            )
+    except delivery_service.DeliveryValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return campaigns
 
 
 @router.get("/campaigns/{campaign_id}", response_model=CampaignResponse)
-def get_campaign(campaign_id: UUID, session: DatabaseSession) -> CampaignResponse:
+def get_campaign(
+    campaign_id: UUID, request: Request, session: DatabaseSession
+) -> CampaignResponse:
     try:
-        return service.get_campaign(session, campaign_id)
+        campaign = service.get_campaign(session, campaign_id)
+        delivery_service.campaign_source_packs(
+            session, request.app.state.settings, campaign_id
+        )
+        return campaign
+    except delivery_service.DeliveryValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except service.EntityNotFoundError as error:
         raise _not_found_or_conflict(error) from error
 
 
 @router.put("/campaigns/{campaign_id}", response_model=CampaignResponse)
 def replace_campaign(
-    campaign_id: UUID, payload: CampaignReplace, session: DatabaseSession
+    campaign_id: UUID,
+    payload: CampaignReplace,
+    request: Request,
+    session: DatabaseSession,
 ) -> CampaignResponse:
     try:
-        return service.replace_campaign(session, campaign_id, payload)
+        enabled = delivery_service.validated_campaign_source_pack_ids(
+            request.app.state.settings,
+            payload.era,
+            list(payload.enabled_source_pack_ids),
+        )
+        return service.replace_campaign(
+            session,
+            campaign_id,
+            payload.model_copy(update={"enabled_source_pack_ids": tuple(enabled)}),
+        )
+    except delivery_service.DeliveryValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except (service.EntityNotFoundError, service.VersionConflictError) as error:
         raise _not_found_or_conflict(error) from error
 
@@ -806,9 +861,13 @@ def export_campaign(campaign_id: UUID, session: DatabaseSession) -> dict[str, An
 
 
 @router.post("/imports/campaign", status_code=status.HTTP_201_CREATED)
-def import_campaign(payload: dict[str, Any], session: DatabaseSession) -> dict[str, str]:
+def import_campaign(
+    payload: dict[str, Any], request: Request, session: DatabaseSession
+) -> dict[str, str]:
     try:
-        campaign_id = delivery_service.import_campaign(session, payload)
+        campaign_id = delivery_service.import_campaign(
+            session, request.app.state.settings, payload
+        )
     except delivery_service.DeliveryConflictError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except delivery_service.DeliveryValidationError as error:

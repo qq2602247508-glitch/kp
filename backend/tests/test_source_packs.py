@@ -10,7 +10,7 @@ from coc_kp_assistant.domain import (
 
 def test_source_pack_is_versioned_and_locked_to_coc7() -> None:
     manifest = SourcePackManifest(
-        pack_id="coc7-core-zh-v1.2.1",
+        pack_id="coc7e.core.zh-v1.2.1",
         title="COC7 核心规则",
         version="1.2.1",
         kind=SourcePackKind.CORE,
@@ -36,4 +36,3 @@ def test_source_file_cannot_escape_pack_root() -> None:
             media_type="application/pdf",
             sha256="b" * 64,
         )
-
