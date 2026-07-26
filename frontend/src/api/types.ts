@@ -312,6 +312,7 @@ export type AIProposal = {
   campaign_version: number;
   target_version: number | null;
   payload: Record<string, unknown>;
+  diff: Record<string, { before: unknown; after: unknown }>;
   evidence: Record<string, unknown>[];
   citation_ids: string[];
   model_name: string;

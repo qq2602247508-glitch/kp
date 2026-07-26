@@ -203,7 +203,7 @@ export function AIKPPage({
                 </span>
               </header>
               <h3>字段差异／拟写入内容</h3>
-              <pre>{JSON.stringify(proposal.payload, null, 2)}</pre>
+              <pre>{JSON.stringify(proposal.diff, null, 2)}</pre>
               <h3>证据</h3>
               {proposal.evidence.length ? (
                 proposal.evidence.map((item, index) => (

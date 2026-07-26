@@ -56,6 +56,7 @@ class AIProposalResponse(DomainModel):
     campaign_version: int
     target_version: int | None
     payload: dict[str, Any]
+    diff: dict[str, dict[str, Any]]
     evidence: tuple[dict[str, Any], ...]
     citation_ids: tuple[str, ...]
     model_name: str

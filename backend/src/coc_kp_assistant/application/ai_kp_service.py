@@ -250,6 +250,21 @@ class AIKPOrchestrator:
         proposals: list[AIProposalResponse] = []
         for proposal in draft.proposals:
             validated_payload = _validate_proposal_payload(proposal)
+            target_snapshot: dict[str, Any] | None = None
+            if proposal.proposal_type == "case_state_replace":
+                assert proposal.target_entity_id is not None
+                assert proposal.expected_entity_version is not None
+                target = case_service.get_entry(
+                    session,
+                    campaign_id,
+                    proposal.case_kind,
+                    proposal.target_entity_id,
+                )
+                if target.version != proposal.expected_entity_version:
+                    raise InvalidAIOutputError(
+                        "AI replace proposal targets a stale entity version"
+                    )
+                target_snapshot = target.model_dump(mode="json")
             cited_evidence = [
                 evidence_by_id[citation_id] for citation_id in proposal.citation_ids
             ]
@@ -273,6 +288,7 @@ class AIKPOrchestrator:
                     "transport": "ollama_local",
                     "tool_access": "fixed_read_only_registry",
                     "mode": request.mode,
+                    "target_snapshot": target_snapshot,
                 },
             )
             session.add(record)
@@ -459,6 +475,13 @@ def _ensure_player_safe(
 
 
 def _proposal_response(record: AIProposalRecord) -> AIProposalResponse:
+    raw_snapshot = record.model_metadata.get("target_snapshot")
+    snapshot = raw_snapshot if isinstance(raw_snapshot, dict) else {}
+    diff = {
+        key: {"before": snapshot.get(key), "after": value}
+        for key, value in record.payload.items()
+        if snapshot.get(key) != value
+    }
     return AIProposalResponse(
         proposal_id=UUID(record.id),
         campaign_id=UUID(record.campaign_id),
@@ -470,6 +493,7 @@ def _proposal_response(record: AIProposalRecord) -> AIProposalResponse:
         campaign_version=record.campaign_version,
         target_version=record.target_version,
         payload=record.payload,
+        diff=diff,
         evidence=tuple(record.evidence),
         citation_ids=tuple(record.citation_ids),
         model_name=record.model_name,

@@ -130,6 +130,10 @@ def test_ask_creates_pending_proposal_without_mutating_case_state(
 
     assert result.model_name == "qwen3:30b-instruct"
     assert result.proposals[0].status == "pending"
+    assert result.proposals[0].diff["title"] == {
+        "before": None,
+        "after": "封闭仓库",
+    }
     assert db_session.scalar(select(func.count()).select_from(CaseSceneRecord)) == 0
     assert db_session.scalar(select(func.count()).select_from(AIProposalRecord)) == 1
     assert provider.last_payload is not None
