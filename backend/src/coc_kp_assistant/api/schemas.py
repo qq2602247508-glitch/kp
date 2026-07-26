@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from coc_kp_assistant.domain.base import DomainModel
 from coc_kp_assistant.domain.campaigns import CampaignCreate, CampaignState
@@ -129,3 +129,41 @@ class AuditResponse(DomainModel):
 class VersionedDeleteRequest(DomainModel):
     expected_version: int = Field(ge=1)
 
+
+class RuleCitationResponse(DomainModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    citation_id: str
+    chunk_id: str
+    excerpt: str
+    score: float
+    source_pack: str
+    edition: str
+    module: str
+    era: tuple[str, ...]
+    filename: str
+    page: int | None
+    section: str
+    checksum: str
+
+
+class RuleSearchResponse(DomainModel):
+    query: str
+    results: tuple[RuleCitationResponse, ...]
+
+
+class RuleAnswerRequest(DomainModel):
+    question: str = Field(min_length=1, max_length=1000)
+    source_pack_ids: tuple[str, ...] = ()
+    editions: tuple[str, ...] = ()
+    modules: tuple[str, ...] = ()
+    eras: tuple[str, ...] = ()
+    limit: int = Field(default=8, ge=1, le=20)
+
+
+class RuleAnswerResponse(DomainModel):
+    question: str
+    answer: str
+    citations: tuple[RuleCitationResponse, ...]
+    abstained: bool
+    reason: str | None

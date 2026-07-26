@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -14,12 +14,18 @@ from coc_kp_assistant.api.schemas import (
     InvestigatorResponse,
     RecordedRollRequest,
     RecordedRollResponse,
+    RuleAnswerRequest,
+    RuleAnswerResponse,
+    RuleCitationResponse,
+    RuleSearchResponse,
     SkillsReplace,
 )
 from coc_kp_assistant.application import service
 from coc_kp_assistant.domain.campaigns import CampaignCreate
 from coc_kp_assistant.domain.investigators import InvestigatorCreate
 from coc_kp_assistant.infrastructure.database import session_dependency
+from coc_kp_assistant.rag import IndexCompatibilityError, IndexIncompleteError
+from coc_kp_assistant.rules import RuleQuery, RulesService, create_rules_service
 
 router = APIRouter(prefix="/api/v1")
 
@@ -29,6 +35,17 @@ def get_session(request: Request) -> Iterator[Session]:
 
 
 DatabaseSession = Annotated[Session, Depends(get_session)]
+
+
+def get_rules_service(request: Request) -> RulesService:
+    existing = getattr(request.app.state, "rules_service", None)
+    if existing is None:
+        existing = create_rules_service(request.app.state.settings)
+        request.app.state.rules_service = existing
+    return cast(RulesService, existing)
+
+
+RulesServiceDependency = Annotated[RulesService, Depends(get_rules_service)]
 
 
 def _not_found_or_conflict(error: Exception) -> HTTPException:
@@ -200,3 +217,68 @@ def list_audits(campaign_id: UUID, session: DatabaseSession) -> list[AuditRespon
     except service.EntityNotFoundError as error:
         raise _not_found_or_conflict(error) from error
 
+
+@router.get("/rules/search", response_model=RuleSearchResponse)
+def search_rules(
+    rules_service: RulesServiceDependency,
+    q: Annotated[str, Query(min_length=1, max_length=1000)],
+    source_pack: Annotated[list[str] | None, Query()] = None,
+    edition: Annotated[list[str] | None, Query()] = None,
+    module: Annotated[list[str] | None, Query()] = None,
+    era: Annotated[list[str] | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=20)] = 8,
+) -> RuleSearchResponse:
+    query = RuleQuery(
+        query=q,
+        source_pack_ids=tuple(source_pack or ()),
+        editions=tuple(edition or ()),
+        modules=tuple(module or ()),
+        eras=tuple(era or ()),
+        limit=limit,
+    )
+    try:
+        results = rules_service.search(query)
+    except (IndexCompatibilityError, IndexIncompleteError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="COC7 rule index is unavailable or incompatible",
+        ) from error
+    return RuleSearchResponse(
+        query=query.query,
+        results=tuple(
+            RuleCitationResponse.model_validate(result, from_attributes=True)
+            for result in results
+        ),
+    )
+
+
+@router.post("/rules/answer", response_model=RuleAnswerResponse)
+def answer_rules(
+    payload: RuleAnswerRequest,
+    rules_service: RulesServiceDependency,
+) -> RuleAnswerResponse:
+    query = RuleQuery(
+        query=payload.question,
+        source_pack_ids=payload.source_pack_ids,
+        editions=payload.editions,
+        modules=payload.modules,
+        eras=payload.eras,
+        limit=payload.limit,
+    )
+    try:
+        answer = rules_service.answer(query)
+    except (IndexCompatibilityError, IndexIncompleteError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="COC7 rule index is unavailable or incompatible",
+        ) from error
+    return RuleAnswerResponse(
+        question=query.query,
+        answer=answer.answer,
+        citations=tuple(
+            RuleCitationResponse.model_validate(citation, from_attributes=True)
+            for citation in answer.citations
+        ),
+        abstained=answer.abstained,
+        reason=answer.reason,
+    )

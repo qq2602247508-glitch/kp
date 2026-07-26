@@ -23,4 +23,14 @@ describe("COC KP application shell", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("先建立一场调查")).toBeInTheDocument();
   });
+
+  it("opens the grounded COC7 rules workspace", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /COC7 规则库/ }));
+
+    expect(
+      screen.getByRole("heading", { name: "有据可查的规则检索" }),
+    ).toBeInTheDocument();
+  });
 });

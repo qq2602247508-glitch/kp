@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from "react";
 
 import { InvestigatorPage } from "./pages/InvestigatorPage";
+import { RulesPage } from "./pages/RulesPage";
 
 type Workspace =
   | "dashboard"
@@ -107,7 +108,10 @@ export function App(): ReactElement {
 
         {workspace === "dashboard" ? <Dashboard /> : null}
         {workspace === "investigators" ? <InvestigatorPage /> : null}
-        {workspace !== "dashboard" && workspace !== "investigators" ? (
+        {workspace === "rules" ? <RulesPage /> : null}
+        {workspace !== "dashboard" &&
+        workspace !== "investigators" &&
+        workspace !== "rules" ? (
           <section className="placeholder" aria-live="polite">
             <span className="large-sigil" aria-hidden="true">
               {active.sigil}

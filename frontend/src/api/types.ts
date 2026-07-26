@@ -138,3 +138,37 @@ export type RollResult = {
   passed: boolean;
 };
 
+export type RuleFilters = {
+  sourcePack?: string;
+  edition?: string;
+  module?: string;
+  era?: string;
+};
+
+export type RuleCitation = {
+  citation_id: string;
+  chunk_id: string;
+  excerpt: string;
+  score: number;
+  source_pack: string;
+  edition: string;
+  module: string;
+  era: string[];
+  filename: string;
+  page: number | null;
+  section: string;
+  checksum: string;
+};
+
+export type RuleSearchResponse = {
+  query: string;
+  results: RuleCitation[];
+};
+
+export type RuleAnswerResponse = {
+  question: string;
+  answer: string;
+  citations: RuleCitation[];
+  abstained: boolean;
+  reason: string | null;
+};

@@ -7,6 +7,9 @@ import type {
   InvestigatorUpdate,
   RollRequest,
   RollResult,
+  RuleAnswerResponse,
+  RuleFilters,
+  RuleSearchResponse,
 } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api/v1").replace(/\/$/, "");
@@ -109,6 +112,62 @@ export function resolveRoll(payload: RollRequest): Promise<RollResult> {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function searchRules(
+  query: string,
+  filters: RuleFilters,
+  signal?: AbortSignal,
+): Promise<RuleSearchResponse> {
+  const params = ruleQueryParams(query, filters);
+  return request<RuleSearchResponse>(`/rules/search?${params.toString()}`, {
+    signal,
+  });
+}
+
+export function answerRules(
+  question: string,
+  filters: RuleFilters,
+  signal?: AbortSignal,
+): Promise<RuleAnswerResponse> {
+  return request<RuleAnswerResponse>("/rules/answer", {
+    method: "POST",
+    body: JSON.stringify({
+      question,
+      source_pack_ids: cleanFilter(filters.sourcePack),
+      editions: cleanFilter(filters.edition),
+      modules: cleanFilter(filters.module),
+      eras: cleanFilter(filters.era),
+      limit: 8,
+    }),
+    signal,
+  });
+}
+
+function ruleQueryParams(query: string, filters: RuleFilters): URLSearchParams {
+  const params = new URLSearchParams({ q: query, limit: "8" });
+  appendFilters(params, "source_pack", filters.sourcePack);
+  appendFilters(params, "edition", filters.edition);
+  appendFilters(params, "module", filters.module);
+  appendFilters(params, "era", filters.era);
+  return params;
+}
+
+function appendFilters(
+  params: URLSearchParams,
+  key: string,
+  value: string | undefined,
+): void {
+  for (const item of cleanFilter(value)) {
+    params.append(key, item);
+  }
+}
+
+function cleanFilter(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function normalizeInvestigator(value: InvestigatorWire | Investigator): Investigator {
