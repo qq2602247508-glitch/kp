@@ -1,9 +1,61 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 
 describe("COC KP application shell", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/campaigns")) {
+          return { ok: true, json: async () => [{ campaign_id: "campaign-1", title: "雾港失踪案", era: "1920s" }] };
+        }
+        if (url.endsWith("/delivery/readiness")) {
+          return {
+            ok: true,
+            json: async () => ({
+              ready: true,
+              database: { status: "ready" },
+              sources: { status: "ready", ready_packs: 3, failed_packs: 0 },
+              vector_index: { status: "ready", chunk_count: 42 },
+              models: {
+                provider: "ollama",
+                provider_status: "ready",
+                embedding: { name: "bge-m3:latest", status: "ready", installed: true, download_attempted: false },
+                completion: { name: "qwen3:30b-instruct", status: "ready", installed: true, download_attempted: false },
+              },
+            }),
+          };
+        }
+        return { ok: true, json: async () => [] };
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("shows readiness and dashboard counts from the real API", async () => {
+    render(<App />);
+
+    expect(await screen.findByText("本地服务已就绪 · 8010")).toBeInTheDocument();
+    expect(await screen.findByText("3 个资料包，42 个可检索片段。")).toBeInTheDocument();
+    expect(screen.queryByText(/未索引|待连接|演示数字/)).not.toBeInTheDocument();
+  });
+
+  it("changes the global campaign and persists it", async () => {
+    render(<App />);
+    const picker = await screen.findByRole("combobox", { name: "全局当前案件" });
+
+    expect(picker).toHaveValue("campaign-1");
+    expect(window.localStorage.getItem("local-coc-kp-assistant:selected-campaign")).toBe("campaign-1");
+    expect(screen.getByText("雾港失踪案：守秘档案已展开。")).toBeInTheDocument();
+  });
+
   it("starts on the keeper dashboard", () => {
     render(<App />);
 
@@ -21,7 +73,7 @@ describe("COC KP application shell", () => {
     expect(
       await screen.findByRole("heading", { name: "COC7 调查员角色卡" }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("先建立一场调查")).toBeInTheDocument();
+    expect(await screen.findByLabelText("当前调查员")).toBeInTheDocument();
   });
 
   it("opens the grounded COC7 rules workspace", () => {
