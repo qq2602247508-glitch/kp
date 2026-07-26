@@ -172,3 +172,46 @@ export type RuleAnswerResponse = {
   abstained: boolean;
   reason: string | null;
 };
+
+export type CaseEntityKind =
+  | "sessions"
+  | "people"
+  | "locations"
+  | "scenes"
+  | "clues"
+  | "relationships"
+  | "handouts"
+  | "timeline-events";
+
+export type CaseEntryDraft = {
+  title: string;
+  player_visible_text: string;
+  keeper_truth: string;
+  status: string;
+  time_label?: string | null;
+  role?: string | null;
+  session_id?: string | null;
+  location_id?: string | null;
+  scene_id?: string | null;
+  person_id?: string | null;
+  clue_id?: string | null;
+  source_clue_id?: string | null;
+  target_clue_id?: string | null;
+  relationship_type?: string | null;
+  discovered?: boolean;
+  revealed?: boolean;
+  sort_order?: number;
+};
+
+export type CaseEntry = Required<
+  Omit<CaseEntryDraft, "time_label" | "role">
+> & {
+  time_label: string | null;
+  role: string | null;
+  entity_id: string;
+  campaign_id: string;
+  kind: CaseEntityKind;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};

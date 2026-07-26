@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from "react";
 
 import { InvestigatorPage } from "./pages/InvestigatorPage";
+import { CaseWorkspacePage } from "./pages/CaseWorkspacePage";
 import { RulesPage } from "./pages/RulesPage";
 
 type Workspace =
@@ -109,8 +110,16 @@ export function App(): ReactElement {
         {workspace === "dashboard" ? <Dashboard /> : null}
         {workspace === "investigators" ? <InvestigatorPage /> : null}
         {workspace === "rules" ? <RulesPage /> : null}
+        {workspace === "table" ? <CaseWorkspacePage initialKind="sessions" /> : null}
+        {workspace === "people" ? <CaseWorkspacePage initialKind="people" /> : null}
+        {workspace === "locations" ? <CaseWorkspacePage initialKind="locations" /> : null}
+        {workspace === "clues" ? <CaseWorkspacePage initialKind="clues" /> : null}
         {workspace !== "dashboard" &&
+        workspace !== "table" &&
         workspace !== "investigators" &&
+        workspace !== "people" &&
+        workspace !== "locations" &&
+        workspace !== "clues" &&
         workspace !== "rules" ? (
           <section className="placeholder" aria-live="polite">
             <span className="large-sigil" aria-hidden="true">

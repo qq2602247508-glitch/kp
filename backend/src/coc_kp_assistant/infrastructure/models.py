@@ -244,3 +244,225 @@ class StateAuditRecord(Base):
         default=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
+
+
+class CaseSessionRecord(Base):
+    __tablename__ = "case_sessions"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_case_session_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    player_visible_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    keeper_truth: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="planned")
+    time_label: Mapped[str | None] = mapped_column(String(120))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CasePersonRecord(Base):
+    __tablename__ = "case_people"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_case_person_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    role: Mapped[str | None] = mapped_column(String(120))
+    player_visible_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    keeper_truth: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CaseLocationRecord(Base):
+    __tablename__ = "case_locations"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_case_location_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    player_visible_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    keeper_truth: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CaseSceneRecord(Base):
+    __tablename__ = "case_scenes"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_case_scene_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("case_sessions.id", ondelete="SET NULL"), index=True
+    )
+    location_id: Mapped[str | None] = mapped_column(
+        ForeignKey("case_locations.id", ondelete="SET NULL"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    player_visible_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    keeper_truth: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="planned")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CaseClueRecord(Base):
+    __tablename__ = "case_clues"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_case_clue_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    scene_id: Mapped[str | None] = mapped_column(
+        ForeignKey("case_scenes.id", ondelete="SET NULL"), index=True
+    )
+    person_id: Mapped[str | None] = mapped_column(
+        ForeignKey("case_people.id", ondelete="SET NULL"), index=True
+    )
+    location_id: Mapped[str | None] = mapped_column(
+        ForeignKey("case_locations.id", ondelete="SET NULL"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    player_visible_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    keeper_truth: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+    discovered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CaseRelationshipRecord(Base):
+    __tablename__ = "case_relationships"
+    __table_args__ = (
+        CheckConstraint("source_clue_id <> target_clue_id", name="ck_clue_link_distinct"),
+        CheckConstraint("version >= 1", name="ck_case_relationship_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_clue_id: Mapped[str] = mapped_column(
+        ForeignKey("case_clues.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_clue_id: Mapped[str] = mapped_column(
+        ForeignKey("case_clues.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    relationship_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    player_visible_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    keeper_truth: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CaseHandoutRecord(Base):
+    __tablename__ = "case_handouts"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_case_handout_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    clue_id: Mapped[str | None] = mapped_column(
+        ForeignKey("case_clues.id", ondelete="SET NULL"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    player_visible_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    keeper_truth: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="draft")
+    revealed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CaseTimelineEventRecord(Base):
+    __tablename__ = "case_timeline_events"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_case_timeline_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("case_sessions.id", ondelete="SET NULL"), index=True
+    )
+    scene_id: Mapped[str | None] = mapped_column(
+        ForeignKey("case_scenes.id", ondelete="SET NULL"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    player_visible_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    keeper_truth: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="planned")
+    time_label: Mapped[str | None] = mapped_column(String(120))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )

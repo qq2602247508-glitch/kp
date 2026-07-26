@@ -1,4 +1,11 @@
 from .campaigns import CampaignCreate, CampaignEra, CampaignState
+from .case_state import (
+    CaseEntityKind,
+    CaseEntryCreate,
+    CaseEntryReplace,
+    CaseEntryResponse,
+    PlayerCaseEntryResponse,
+)
 from .investigators import (
     CoreCharacteristics,
     InvestigatorBackstory,
@@ -27,12 +34,17 @@ __all__ = [
     "CampaignCreate",
     "CampaignEra",
     "CampaignState",
+    "CaseEntityKind",
+    "CaseEntryCreate",
+    "CaseEntryReplace",
+    "CaseEntryResponse",
     "CoreCharacteristics",
     "InvestigatorBackstory",
     "InvestigatorCondition",
     "InvestigatorCreate",
     "InvestigatorState",
     "PercentileDice",
+    "PlayerCaseEntryResponse",
     "RollContext",
     "RollDifficulty",
     "RollRequest",

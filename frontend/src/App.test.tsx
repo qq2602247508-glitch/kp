@@ -33,4 +33,17 @@ describe("COC KP application shell", () => {
       screen.getByRole("heading", { name: "有据可查的规则检索" }),
     ).toBeInTheDocument();
   });
+
+  it("opens a usable clue-network case workspace", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /线索网络/ }));
+
+    expect(
+      await screen.findByRole("heading", { name: "案件线索网络" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新建线索" })).toBeInTheDocument();
+    expect(screen.getByText("玩家可见信息")).toBeInTheDocument();
+    expect(screen.getByText("KP 真相")).toBeInTheDocument();
+  });
 });

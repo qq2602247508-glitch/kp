@@ -20,8 +20,15 @@ from coc_kp_assistant.api.schemas import (
     RuleSearchResponse,
     SkillsReplace,
 )
-from coc_kp_assistant.application import service
+from coc_kp_assistant.application import case_service, service
 from coc_kp_assistant.domain.campaigns import CampaignCreate
+from coc_kp_assistant.domain.case_state import (
+    CaseEntityKind,
+    CaseEntryCreate,
+    CaseEntryReplace,
+    CaseEntryResponse,
+    PlayerCaseEntryResponse,
+)
 from coc_kp_assistant.domain.investigators import InvestigatorCreate
 from coc_kp_assistant.infrastructure.database import session_dependency
 from coc_kp_assistant.rag import IndexCompatibilityError, IndexIncompleteError
@@ -52,6 +59,14 @@ def _not_found_or_conflict(error: Exception) -> HTTPException:
     if isinstance(error, service.EntityNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
+
+
+def _case_state_error(error: Exception) -> HTTPException:
+    if isinstance(error, case_service.InvalidCaseStateError):
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        )
+    return _not_found_or_conflict(error)
 
 
 @router.post("/campaigns", response_model=CampaignResponse, status_code=status.HTTP_201_CREATED)
@@ -92,6 +107,112 @@ def delete_campaign(
         service.delete_campaign(session, campaign_id, expected_version)
     except (service.EntityNotFoundError, service.VersionConflictError) as error:
         raise _not_found_or_conflict(error) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/campaigns/{campaign_id}/case-state/{kind}",
+    response_model=CaseEntryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_case_entry(
+    campaign_id: UUID,
+    kind: CaseEntityKind,
+    payload: CaseEntryCreate,
+    session: DatabaseSession,
+) -> CaseEntryResponse:
+    try:
+        return case_service.create_entry(session, campaign_id, kind, payload)
+    except (service.EntityNotFoundError, case_service.InvalidCaseStateError) as error:
+        raise _case_state_error(error) from error
+
+
+@router.get(
+    "/campaigns/{campaign_id}/case-state/{kind}",
+    response_model=list[CaseEntryResponse],
+)
+def list_case_entries(
+    campaign_id: UUID,
+    kind: CaseEntityKind,
+    session: DatabaseSession,
+) -> list[CaseEntryResponse]:
+    try:
+        return case_service.list_entries(session, campaign_id, kind)
+    except service.EntityNotFoundError as error:
+        raise _case_state_error(error) from error
+
+
+@router.get(
+    "/campaigns/{campaign_id}/case-state/{kind}/{entity_id}",
+    response_model=CaseEntryResponse,
+)
+def get_case_entry(
+    campaign_id: UUID,
+    kind: CaseEntityKind,
+    entity_id: UUID,
+    session: DatabaseSession,
+) -> CaseEntryResponse:
+    try:
+        return case_service.get_entry(session, campaign_id, kind, entity_id)
+    except service.EntityNotFoundError as error:
+        raise _case_state_error(error) from error
+
+
+@router.get(
+    "/campaigns/{campaign_id}/case-state/{kind}/{entity_id}/player-view",
+    response_model=PlayerCaseEntryResponse,
+)
+def get_player_case_entry(
+    campaign_id: UUID,
+    kind: CaseEntityKind,
+    entity_id: UUID,
+    session: DatabaseSession,
+) -> PlayerCaseEntryResponse:
+    try:
+        entry = case_service.get_entry(session, campaign_id, kind, entity_id)
+    except service.EntityNotFoundError as error:
+        raise _case_state_error(error) from error
+    return case_service.player_projection(entry)
+
+
+@router.put(
+    "/campaigns/{campaign_id}/case-state/{kind}/{entity_id}",
+    response_model=CaseEntryResponse,
+)
+def replace_case_entry(
+    campaign_id: UUID,
+    kind: CaseEntityKind,
+    entity_id: UUID,
+    payload: CaseEntryReplace,
+    session: DatabaseSession,
+) -> CaseEntryResponse:
+    try:
+        return case_service.replace_entry(session, campaign_id, kind, entity_id, payload)
+    except (
+        service.EntityNotFoundError,
+        service.VersionConflictError,
+        case_service.InvalidCaseStateError,
+    ) as error:
+        raise _case_state_error(error) from error
+
+
+@router.delete(
+    "/campaigns/{campaign_id}/case-state/{kind}/{entity_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_case_entry(
+    campaign_id: UUID,
+    kind: CaseEntityKind,
+    entity_id: UUID,
+    session: DatabaseSession,
+    expected_version: Annotated[int, Query(ge=1)],
+) -> Response:
+    try:
+        case_service.delete_entry(
+            session, campaign_id, kind, entity_id, expected_version
+        )
+    except (service.EntityNotFoundError, service.VersionConflictError) as error:
+        raise _case_state_error(error) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

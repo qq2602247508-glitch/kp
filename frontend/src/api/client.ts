@@ -1,6 +1,9 @@
 import type {
   Campaign,
   CampaignCreate,
+  CaseEntityKind,
+  CaseEntry,
+  CaseEntryDraft,
   Investigator,
   InvestigatorCondition,
   InvestigatorProfile,
@@ -67,6 +70,59 @@ export function createCampaign(payload: CampaignCreate): Promise<Campaign> {
   return request<Campaign>("/campaigns", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function listCaseEntries(
+  campaignId: string,
+  kind: CaseEntityKind,
+  signal?: AbortSignal,
+): Promise<CaseEntry[]> {
+  return request<CaseEntry[]>(
+    `/campaigns/${campaignId}/case-state/${kind}`,
+    { signal },
+  );
+}
+
+export function createCaseEntry(
+  campaignId: string,
+  kind: CaseEntityKind,
+  payload: CaseEntryDraft,
+): Promise<CaseEntry> {
+  return request<CaseEntry>(`/campaigns/${campaignId}/case-state/${kind}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateCaseEntry(
+  campaignId: string,
+  kind: CaseEntityKind,
+  entityId: string,
+  payload: CaseEntryDraft & { expected_version: number },
+): Promise<CaseEntry> {
+  return request<CaseEntry>(
+    `/campaigns/${campaignId}/case-state/${kind}/${entityId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function deleteCaseEntry(
+  campaignId: string,
+  kind: CaseEntityKind,
+  entityId: string,
+  expectedVersion: number,
+): Promise<void> {
+  return fetch(
+    `${API_BASE}/campaigns/${campaignId}/case-state/${kind}/${entityId}?expected_version=${expectedVersion}`,
+    { method: "DELETE", headers: { Accept: "application/json" } },
+  ).then((response) => {
+    if (!response.ok) {
+      throw new ApiError(`${response.status} ${response.statusText}`.trim(), response.status);
+    }
   });
 }
 

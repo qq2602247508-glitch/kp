@@ -1062,6 +1062,262 @@ button:disabled {
   text-align: center;
 }
 
+.case-workspace {
+  display: grid;
+  gap: 18px;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 28px 30px 48px;
+}
+
+.case-workspace-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 24px;
+  border: 1px solid #344239;
+  border-radius: 8px;
+  background: linear-gradient(115deg, #17241e, #101714);
+}
+
+.case-workspace-header h2 {
+  margin-bottom: 7px;
+  color: #e7e2d4;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 28px;
+  font-weight: 400;
+}
+
+.case-workspace-header p:last-child {
+  max-width: 650px;
+  margin-bottom: 0;
+  color: #8d9a91;
+  line-height: 1.65;
+}
+
+.case-picker {
+  display: grid;
+  min-width: 320px;
+  gap: 9px;
+}
+
+.case-picker label,
+.case-editor label {
+  display: grid;
+  gap: 6px;
+  color: #8f9c94;
+  font-size: 11px;
+}
+
+.case-picker > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.case-picker input,
+.case-picker select,
+.case-editor input,
+.case-editor textarea,
+.case-editor select {
+  width: 100%;
+  border: 1px solid #3a4941;
+  border-radius: 4px;
+  color: #d6d4ca;
+  background: #0c1210;
+}
+
+.case-picker input,
+.case-picker select,
+.case-editor input,
+.case-editor select {
+  min-height: 36px;
+  padding: 7px 9px;
+}
+
+.case-editor textarea {
+  padding: 10px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.case-picker button,
+.case-tabs button,
+.case-section-title button,
+.case-actions button {
+  border: 1px solid #4c6656;
+  border-radius: 4px;
+  color: #cfd6c8;
+  background: #18251f;
+  cursor: pointer;
+}
+
+.case-picker button,
+.case-section-title button,
+.case-actions button {
+  padding: 8px 13px;
+}
+
+.case-picker button:disabled,
+.case-section-title button:disabled,
+.case-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.case-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 0;
+}
+
+.case-tabs button {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  color: #85928a;
+  background: #111815;
+}
+
+.case-tabs button.active {
+  border-color: #718873;
+  color: #e0e2d7;
+  background: #1b2b23;
+}
+
+.case-columns {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(500px, 1.6fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.case-list,
+.case-editor {
+  display: grid;
+  gap: 11px;
+  padding: 17px;
+  border: 1px solid #303e36;
+  border-radius: 7px;
+  background: rgba(13, 20, 17, 0.9);
+}
+
+.case-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 40px;
+}
+
+.case-section-title span,
+.case-section-title small {
+  display: block;
+}
+
+.case-section-title span {
+  color: #d4d4c9;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 17px;
+}
+
+.case-section-title small {
+  margin-top: 3px;
+  color: #68766e;
+  font-size: 10px;
+}
+
+.case-empty {
+  margin: 0;
+  padding: 28px 12px;
+  color: #6f7b74;
+  text-align: center;
+}
+
+.case-card {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 12px 13px;
+  border: 1px solid #2e3c34;
+  border-radius: 5px;
+  color: #c8cbc1;
+  background: #101815;
+  cursor: pointer;
+  text-align: left;
+}
+
+.case-card.selected {
+  border-color: #69806c;
+  background: #18251f;
+}
+
+.case-card small {
+  color: #708078;
+  font-size: 9px;
+}
+
+.case-card p {
+  margin: 5px 0 0;
+  overflow: hidden;
+  color: #8c9890;
+  font-size: 11px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visibility-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.keeper-truth {
+  padding: 10px;
+  border: 1px solid #5a4b39;
+  border-radius: 5px;
+  background: rgba(48, 36, 24, 0.22);
+}
+
+.case-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.case-check {
+  display: flex !important;
+  align-items: center;
+  align-self: end;
+  min-height: 36px;
+}
+
+.case-check input {
+  width: 16px;
+  min-height: 16px;
+}
+
+.case-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-top: 5px;
+}
+
+.case-actions .danger {
+  border-color: #684848;
+  color: #d2aaaa;
+  background: #261818;
+}
+
+.case-actions span {
+  margin-left: auto;
+  color: #7f8d84;
+  font-size: 10px;
+}
+
 @media (max-width: 820px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1154,5 +1410,24 @@ button:disabled {
 
   .rules-actions small {
     margin-left: 0;
+  }
+
+  .case-workspace {
+    padding: 18px;
+  }
+
+  .case-workspace-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .case-picker {
+    min-width: 0;
+  }
+
+  .case-columns,
+  .visibility-grid,
+  .case-meta-grid {
+    grid-template-columns: 1fr;
   }
 }
