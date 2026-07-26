@@ -4,6 +4,7 @@ import type {
   CaseEntityKind,
   CaseEntry,
   CaseEntryDraft,
+  PlayerCaseEntry,
   Investigator,
   InvestigatorCondition,
   InvestigatorProfile,
@@ -12,6 +13,7 @@ import type {
   ChaseParticipant,
   EngineOperation,
   RuleOperationLog,
+  StateAuditLog,
   WeaponPolicy,
   RollRequest,
   RollResult,
@@ -54,6 +56,23 @@ export class ApiError extends Error {
   }
 }
 
+function describeErrorDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item) {
+          return String(item.msg);
+        }
+        return "";
+      })
+      .filter(Boolean);
+    if (messages.length > 0) return messages.join("；");
+  }
+  return fallback;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -67,14 +86,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`.trim();
     try {
-      const body = (await response.json()) as { detail?: string };
-      detail = body.detail ?? detail;
+      const body = (await response.json()) as { detail?: unknown };
+      detail = describeErrorDetail(body.detail, detail);
     } catch {
       // The status text remains the most useful available message.
     }
     throw new ApiError(detail, response.status);
   }
 
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -96,6 +116,18 @@ export function listCaseEntries(
 ): Promise<CaseEntry[]> {
   return request<CaseEntry[]>(
     `/campaigns/${campaignId}/case-state/${kind}`,
+    { signal },
+  );
+}
+
+export function getPlayerCaseEntry(
+  campaignId: string,
+  kind: CaseEntityKind,
+  entityId: string,
+  signal?: AbortSignal,
+): Promise<PlayerCaseEntry> {
+  return request<PlayerCaseEntry>(
+    `/campaigns/${campaignId}/case-state/${kind}/${entityId}/player-view`,
     { signal },
   );
 }
@@ -132,14 +164,10 @@ export function deleteCaseEntry(
   entityId: string,
   expectedVersion: number,
 ): Promise<void> {
-  return fetch(
-    `${API_BASE}/campaigns/${campaignId}/case-state/${kind}/${entityId}?expected_version=${expectedVersion}`,
-    { method: "DELETE", headers: { Accept: "application/json" } },
-  ).then((response) => {
-    if (!response.ok) {
-      throw new ApiError(`${response.status} ${response.statusText}`.trim(), response.status);
-    }
-  });
+  return request<void>(
+    `/campaigns/${campaignId}/case-state/${kind}/${entityId}?expected_version=${expectedVersion}`,
+    { method: "DELETE" },
+  );
 }
 
 export function listInvestigators(
@@ -289,6 +317,15 @@ export function listRuleOperations(
     `/campaigns/${campaignId}/rule-operations`,
     { signal },
   );
+}
+
+export function listStateAudits(
+  campaignId: string,
+  signal?: AbortSignal,
+): Promise<StateAuditLog[]> {
+  return request<StateAuditLog[]>(`/campaigns/${campaignId}/audits`, {
+    signal,
+  });
 }
 
 export function listWeapons(signal?: AbortSignal): Promise<WeaponPolicy[]> {

@@ -220,6 +220,19 @@ export type CaseEntry = Required<
   updated_at: string;
 };
 
+export type PlayerCaseEntry = {
+  entity_id: string;
+  campaign_id: string;
+  kind: CaseEntityKind;
+  title: string;
+  player_visible_text: string;
+  status: string;
+  time_label: string | null;
+  role: string | null;
+  discovered: boolean;
+  revealed: boolean;
+};
+
 export type EngineCitation = {
   citation_id: string;
   source_pack_id: string;
@@ -263,6 +276,18 @@ export type RuleOperationLog = {
   output_data: Record<string, unknown>;
   citation: EngineCitation;
   citations: EngineCitation[];
+  created_at: string;
+};
+
+export type StateAuditLog = {
+  audit_id: string;
+  campaign_id: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  expected_version: number | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
   created_at: string;
 };
 

@@ -10,6 +10,7 @@ import {
   createCampaign,
   createCaseEntry,
   deleteCaseEntry,
+  getPlayerCaseEntry,
   listCampaigns,
   listCaseEntries,
   updateCaseEntry,
@@ -19,6 +20,7 @@ import type {
   CaseEntityKind,
   CaseEntry,
   CaseEntryDraft,
+  PlayerCaseEntry,
 } from "../api/types";
 
 const KINDS: Array<{ kind: CaseEntityKind; label: string; createLabel: string }> = [
@@ -56,14 +58,85 @@ type Props = {
   initialKind: CaseEntityKind;
 };
 
+type CaseEntryCache = Record<CaseEntityKind, CaseEntry[]>;
+
+function emptyCache(): CaseEntryCache {
+  return {
+    sessions: [],
+    scenes: [],
+    people: [],
+    locations: [],
+    clues: [],
+    relationships: [],
+    handouts: [],
+    "timeline-events": [],
+  };
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function payloadForKind(
+  kind: CaseEntityKind,
+  draft: CaseEntryDraft,
+): CaseEntryDraft {
+  const common = {
+    title: draft.title.trim(),
+    player_visible_text: draft.player_visible_text,
+    keeper_truth: draft.keeper_truth,
+    status: draft.status,
+  };
+  switch (kind) {
+    case "sessions":
+      return { ...common, time_label: draft.time_label };
+    case "people":
+      return { ...common, role: draft.role };
+    case "locations":
+      return common;
+    case "scenes":
+      return {
+        ...common,
+        session_id: draft.session_id,
+        location_id: draft.location_id,
+      };
+    case "clues":
+      return {
+        ...common,
+        scene_id: draft.scene_id,
+        person_id: draft.person_id,
+        location_id: draft.location_id,
+        discovered: draft.discovered,
+      };
+    case "relationships":
+      return {
+        ...common,
+        source_clue_id: draft.source_clue_id,
+        target_clue_id: draft.target_clue_id,
+        relationship_type: draft.relationship_type,
+      };
+    case "handouts":
+      return { ...common, clue_id: draft.clue_id, revealed: draft.revealed };
+    case "timeline-events":
+      return {
+        ...common,
+        session_id: draft.session_id,
+        scene_id: draft.scene_id,
+        time_label: draft.time_label,
+        sort_order: draft.sort_order,
+      };
+  }
+}
+
 export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [campaignId, setCampaignId] = useState("");
   const [newCaseTitle, setNewCaseTitle] = useState("未命名案件");
   const [kind, setKind] = useState<CaseEntityKind>(initialKind);
-  const [entries, setEntries] = useState<CaseEntry[]>([]);
+  const [entryCache, setEntryCache] = useState<CaseEntryCache>(emptyCache);
   const [draft, setDraft] = useState<CaseEntryDraft>(EMPTY_DRAFT);
   const [editing, setEditing] = useState<CaseEntry | null>(null);
+  const [playerPreview, setPlayerPreview] = useState<PlayerCaseEntry | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -80,30 +153,65 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
         setCampaigns(result);
         setCampaignId((current) => current || result[0]?.campaign_id || "");
       })
-      .catch(() => setMessage("尚未连接本地案件库。"));
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setMessage(errorMessage(error, "尚未连接本地案件库。"));
+        }
+      });
     return () => controller.abort();
   }, []);
 
   useEffect(() => {
     if (!campaignId) {
-      setEntries([]);
+      setEntryCache(emptyCache());
       return;
     }
     const controller = new AbortController();
-    listCaseEntries(campaignId, kind, controller.signal)
-      .then(setEntries)
-      .catch(() => setMessage("无法读取当前案件资料。"));
+    Promise.all(
+      KINDS.map(async ({ kind: requestedKind }) => [
+        requestedKind,
+        await listCaseEntries(campaignId, requestedKind, controller.signal),
+      ] as const),
+    )
+      .then((results) => {
+        setEntryCache(
+          Object.fromEntries(results) as CaseEntryCache,
+        );
+        setMessage("");
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setMessage(errorMessage(error, "无法读取当前案件资料。"));
+        }
+      });
     return () => controller.abort();
-  }, [campaignId, kind]);
+  }, [campaignId]);
+
+  useEffect(() => {
+    if (!campaignId || !editing) {
+      setPlayerPreview(null);
+      return;
+    }
+    const controller = new AbortController();
+    setPlayerPreview(null);
+    getPlayerCaseEntry(
+      campaignId,
+      editing.kind,
+      editing.entity_id,
+      controller.signal,
+    )
+      .then(setPlayerPreview)
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setMessage(errorMessage(error, "无法读取玩家视图。"));
+        }
+      });
+    return () => controller.abort();
+  }, [campaignId, editing]);
 
   const selectedKind = KINDS.find((item) => item.kind === kind) ?? KINDS[4];
-  const references = useMemo(
-    () => ({
-      sessions: kind === "sessions" ? entries : [],
-      clues: kind === "clues" ? entries : [],
-    }),
-    [entries, kind],
-  );
+  const entries = entryCache[kind];
+  const references = useMemo(() => entryCache, [entryCache]);
 
   async function addCase(): Promise<void> {
     if (!newCaseTitle.trim()) return;
@@ -119,8 +227,8 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
       setCampaigns((current) => [...current, created]);
       setCampaignId(created.campaign_id);
       setMessage("案件已建立。");
-    } catch {
-      setMessage("案件建立失败，请检查本地服务。");
+    } catch (error: unknown) {
+      setMessage(errorMessage(error, "案件建立失败，请检查本地服务。"));
     } finally {
       setBusy(false);
     }
@@ -128,11 +236,13 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
 
   function beginNew(): void {
     setEditing(null);
+    setPlayerPreview(null);
     setDraft({ ...EMPTY_DRAFT, status: kind === "sessions" ? "planned" : "active" });
   }
 
   function beginEdit(entry: CaseEntry): void {
     setEditing(entry);
+    setPlayerPreview(null);
     setDraft({
       title: entry.title,
       player_visible_text: entry.player_visible_text,
@@ -159,24 +269,23 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
     if (!campaignId || !draft.title.trim()) return;
     setBusy(true);
     try {
+      const payload = payloadForKind(kind, draft);
       const saved = editing
         ? await updateCaseEntry(campaignId, kind, editing.entity_id, {
-            ...draft,
-            title: draft.title.trim(),
+            ...payload,
             expected_version: editing.version,
           })
-        : await createCaseEntry(campaignId, kind, {
-            ...draft,
-            title: draft.title.trim(),
-          });
-      setEntries((current) => {
-        const others = current.filter((item) => item.entity_id !== saved.entity_id);
-        return [...others, saved];
+        : await createCaseEntry(campaignId, kind, payload);
+      setEntryCache((current) => {
+        const others = current[kind].filter(
+          (item) => item.entity_id !== saved.entity_id,
+        );
+        return { ...current, [kind]: [...others, saved] };
       });
       beginEdit(saved);
       setMessage(editing ? "修改已保存并记录审计。" : "资料已创建并记录审计。");
-    } catch {
-      setMessage("保存失败；资料可能已在另一处更新，请重新载入。");
+    } catch (error: unknown) {
+      setMessage(errorMessage(error, "保存失败；请重新载入。"));
     } finally {
       setBusy(false);
     }
@@ -192,13 +301,16 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
         editing.entity_id,
         editing.version,
       );
-      setEntries((current) =>
-        current.filter((item) => item.entity_id !== editing.entity_id),
-      );
+      setEntryCache((current) => ({
+        ...current,
+        [kind]: current[kind].filter(
+          (item) => item.entity_id !== editing.entity_id,
+        ),
+      }));
       beginNew();
       setMessage("资料已删除，审计记录仍保留。");
-    } catch {
-      setMessage("删除失败；请重新载入最新版本。");
+    } catch (error: unknown) {
+      setMessage(errorMessage(error, "删除失败；请重新载入最新版本。"));
     } finally {
       setBusy(false);
     }
@@ -215,7 +327,13 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
         <div className="case-picker">
           <label>
             当前案件
-            <select value={campaignId} onChange={(event) => setCampaignId(event.target.value)}>
+            <select
+              value={campaignId}
+              onChange={(event) => {
+                setCampaignId(event.target.value);
+                beginNew();
+              }}
+            >
               <option value="">请选择案件</option>
               {campaigns.map((campaign) => (
                 <option key={campaign.campaign_id} value={campaign.campaign_id}>
@@ -319,6 +437,33 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
               />
             </label>
           </div>
+          {editing ? (
+            <section
+              aria-label="玩家视图预览"
+              className="player-view-preview"
+              role="region"
+            >
+              <div className="case-section-title">
+                <div>
+                  <span>玩家视图预览</span>
+                  <small>来自只读玩家投影 API</small>
+                </div>
+              </div>
+              {playerPreview ? (
+                <>
+                  <strong>{playerPreview.title}</strong>
+                  <p>{playerPreview.player_visible_text || "暂无玩家可见信息"}</p>
+                  <small>
+                    {playerPreview.status}
+                    {playerPreview.time_label ? ` · ${playerPreview.time_label}` : ""}
+                    {playerPreview.role ? ` · ${playerPreview.role}` : ""}
+                  </small>
+                </>
+              ) : (
+                <p>正在读取玩家视图……</p>
+              )}
+            </section>
+          ) : null}
           <div className="case-meta-grid">
             <label>
               状态
@@ -347,34 +492,210 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
                 />
               </label>
             ) : null}
+            {kind === "scenes" ? (
+              <>
+                <label>
+                  所属团次
+                  <select
+                    value={draft.session_id ?? ""}
+                    onChange={(event) =>
+                      setDraft({ ...draft, session_id: event.target.value || null })
+                    }
+                  >
+                    <option value="">未指定</option>
+                    {references.sessions.map((entry) => (
+                      <option key={entry.entity_id} value={entry.entity_id}>
+                        {entry.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  发生地点
+                  <select
+                    value={draft.location_id ?? ""}
+                    onChange={(event) =>
+                      setDraft({ ...draft, location_id: event.target.value || null })
+                    }
+                  >
+                    <option value="">未指定</option>
+                    {references.locations.map((entry) => (
+                      <option key={entry.entity_id} value={entry.entity_id}>
+                        {entry.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            ) : null}
+            {kind === "clues" ? (
+              <>
+                <label>
+                  所属场景
+                  <select
+                    value={draft.scene_id ?? ""}
+                    onChange={(event) =>
+                      setDraft({ ...draft, scene_id: event.target.value || null })
+                    }
+                  >
+                    <option value="">未指定</option>
+                    {references.scenes.map((entry) => (
+                      <option key={entry.entity_id} value={entry.entity_id}>
+                        {entry.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  相关人物
+                  <select
+                    value={draft.person_id ?? ""}
+                    onChange={(event) =>
+                      setDraft({ ...draft, person_id: event.target.value || null })
+                    }
+                  >
+                    <option value="">未指定</option>
+                    {references.people.map((entry) => (
+                      <option key={entry.entity_id} value={entry.entity_id}>
+                        {entry.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  相关地点
+                  <select
+                    value={draft.location_id ?? ""}
+                    onChange={(event) =>
+                      setDraft({ ...draft, location_id: event.target.value || null })
+                    }
+                  >
+                    <option value="">未指定</option>
+                    {references.locations.map((entry) => (
+                      <option key={entry.entity_id} value={entry.entity_id}>
+                        {entry.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            ) : null}
             {kind === "relationships" ? (
               <>
                 <label>
-                  起点线索 ID
-                  <input
-                    list="known-clues"
+                  起点线索
+                  <select
+                    required
                     value={draft.source_clue_id ?? ""}
                     onChange={(event) =>
-                      setDraft({ ...draft, source_clue_id: event.target.value })
+                      setDraft({
+                        ...draft,
+                        source_clue_id: event.target.value || null,
+                      })
                     }
-                  />
+                  >
+                    <option value="">请选择线索</option>
+                    {references.clues.map((entry) => (
+                      <option key={entry.entity_id} value={entry.entity_id}>
+                        {entry.title}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label>
-                  终点线索 ID
-                  <input
-                    list="known-clues"
+                  终点线索
+                  <select
+                    required
                     value={draft.target_clue_id ?? ""}
                     onChange={(event) =>
-                      setDraft({ ...draft, target_clue_id: event.target.value })
+                      setDraft({
+                        ...draft,
+                        target_clue_id: event.target.value || null,
+                      })
                     }
-                  />
+                  >
+                    <option value="">请选择线索</option>
+                    {references.clues.map((entry) => (
+                      <option key={entry.entity_id} value={entry.entity_id}>
+                        {entry.title}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label>
                   关联性质
                   <input
+                    required
                     value={draft.relationship_type ?? ""}
                     onChange={(event) =>
                       setDraft({ ...draft, relationship_type: event.target.value })
+                    }
+                  />
+                </label>
+              </>
+            ) : null}
+            {kind === "handouts" ? (
+              <label>
+                关联线索
+                <select
+                  value={draft.clue_id ?? ""}
+                  onChange={(event) =>
+                    setDraft({ ...draft, clue_id: event.target.value || null })
+                  }
+                >
+                  <option value="">未指定</option>
+                  {references.clues.map((entry) => (
+                    <option key={entry.entity_id} value={entry.entity_id}>
+                      {entry.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {kind === "timeline-events" ? (
+              <>
+                <label>
+                  所属团次
+                  <select
+                    value={draft.session_id ?? ""}
+                    onChange={(event) =>
+                      setDraft({ ...draft, session_id: event.target.value || null })
+                    }
+                  >
+                    <option value="">未指定</option>
+                    {references.sessions.map((entry) => (
+                      <option key={entry.entity_id} value={entry.entity_id}>
+                        {entry.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  所属场景
+                  <select
+                    value={draft.scene_id ?? ""}
+                    onChange={(event) =>
+                      setDraft({ ...draft, scene_id: event.target.value || null })
+                    }
+                  >
+                    <option value="">未指定</option>
+                    {references.scenes.map((entry) => (
+                      <option key={entry.entity_id} value={entry.entity_id}>
+                        {entry.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  排序
+                  <input
+                    type="number"
+                    value={draft.sort_order ?? 0}
+                    onChange={(event) =>
+                      setDraft({
+                        ...draft,
+                        sort_order: Number.parseInt(event.target.value, 10) || 0,
+                      })
                     }
                   />
                 </label>
@@ -397,11 +718,6 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
               </label>
             ) : null}
           </div>
-          <datalist id="known-clues">
-            {references.clues.map((entry) => (
-              <option key={entry.entity_id} value={entry.entity_id}>{entry.title}</option>
-            ))}
-          </datalist>
           <div className="case-actions">
             <button disabled={busy || !campaignId} type="submit">保存</button>
             {editing ? (
