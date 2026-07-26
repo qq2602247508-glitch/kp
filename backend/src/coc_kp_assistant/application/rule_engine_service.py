@@ -410,6 +410,18 @@ def apply_recovery(
     if payload.care_type == "first_aid":
         if payload.first_aid_roll_id is None:
             raise InvalidRuleOperationError("first aid recovery requires a recorded first_aid roll")
+        if _roll_already_consumed(
+            session,
+            operation_type="recovery",
+            roll_id=payload.first_aid_roll_id,
+            json_path=RuleOperationRecord.input_data["first_aid_roll_id"],
+        ) or _roll_already_consumed(
+            session,
+            operation_type="stabilize",
+            roll_id=payload.first_aid_roll_id,
+            json_path=RuleOperationRecord.input_data["first_aid_roll_id"],
+        ):
+            raise InvalidRuleOperationError("first aid roll has already been consumed")
         roll = _roll_for(
             session,
             roll_id=payload.first_aid_roll_id,
@@ -564,6 +576,13 @@ def apply_dying_check(
     )
     if session.scalar(duplicate) is not None:
         raise InvalidRuleOperationError("dying check already recorded for this period")
+    if _roll_already_consumed(
+        session,
+        operation_type="dying_check",
+        roll_id=payload.constitution_roll_id,
+        json_path=RuleOperationRecord.input_data["constitution_roll_id"],
+    ):
+        raise InvalidRuleOperationError("constitution roll has already been consumed")
     record, before = _claim_investigator(
         session, campaign_id, investigator_id, payload.expected_version
     )

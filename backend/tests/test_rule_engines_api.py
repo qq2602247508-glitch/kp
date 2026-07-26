@@ -377,6 +377,104 @@ def test_dying_check_failure_is_terminal(client) -> None:
     assert response.status_code == 200 and "dead" in response.json()["investigator"]["conditions"]
 
 
+def test_first_aid_and_dying_check_rolls_are_single_use(client) -> None:
+    campaign_id, investigator, _ = setup_pair(client)
+    investigator_id = investigator["investigator_id"]
+    session_id = create_case_session(client, campaign_id)
+    first_injury = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/injury",
+        json={
+            "expected_version": investigator["version"],
+            "damage": 1,
+            "reason": "first injury",
+            "case_session_id": session_id,
+        },
+    ).json()
+    aid_roll = client.post(
+        "/api/v1/rolls",
+        json={
+            "campaign_id": campaign_id,
+            "case_session_id": session_id,
+            "investigator_id": investigator_id,
+            "skill_key": "first_aid",
+            "label": "first aid",
+            "target": 60,
+            "dice": {"units_digit": 1, "tens_digits": [1]},
+        },
+    ).json()
+    first_aid = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/recovery",
+        json={
+            "expected_version": first_injury["investigator"]["version"],
+            "care_type": "first_aid",
+            "injury_id": first_injury["injury_id"],
+            "first_aid_roll_id": aid_roll["roll_id"],
+            "case_session_id": session_id,
+        },
+    ).json()
+    second_injury = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/injury",
+        json={
+            "expected_version": first_aid["investigator"]["version"],
+            "damage": 1,
+            "reason": "second injury",
+            "case_session_id": session_id,
+        },
+    ).json()
+    reused_aid = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/recovery",
+        json={
+            "expected_version": second_injury["investigator"]["version"],
+            "care_type": "first_aid",
+            "injury_id": second_injury["injury_id"],
+            "first_aid_roll_id": aid_roll["roll_id"],
+            "case_session_id": session_id,
+        },
+    )
+    assert reused_aid.status_code == 422
+
+    dying = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/injury",
+        json={
+            "expected_version": second_injury["investigator"]["version"],
+            "damage": 11,
+            "reason": "dying",
+            "case_session_id": session_id,
+        },
+    ).json()
+    con_roll = client.post(
+        "/api/v1/rolls",
+        json={
+            "campaign_id": campaign_id,
+            "case_session_id": session_id,
+            "investigator_id": investigator_id,
+            "skill_key": "constitution",
+            "label": "CON",
+            "target": 60,
+            "dice": {"units_digit": 1, "tens_digits": [1]},
+        },
+    ).json()
+    first_check = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/dying-check",
+        json={
+            "expected_version": dying["investigator"]["version"],
+            "constitution_roll_id": con_roll["roll_id"],
+            "period_key": "round-1",
+            "case_session_id": session_id,
+        },
+    ).json()
+    reused_check = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/dying-check",
+        json={
+            "expected_version": first_check["investigator"]["version"],
+            "constitution_roll_id": con_roll["roll_id"],
+            "period_key": "round-2",
+            "case_session_id": session_id,
+        },
+    )
+    assert reused_check.status_code == 422
+
+
 def test_stabilization_medicine_and_insanity_transition_bind_recorded_rolls(client) -> None:
     campaign_id, investigator, _ = setup_pair(client)
     investigator_id = investigator["investigator_id"]
