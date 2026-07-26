@@ -147,10 +147,10 @@ def test_full_run_writes_deterministic_docx_record_with_table_and_checksum(tmp_p
     assert report["status"] == "ready"
     assert record["default_enabled"] is False
     assert record["provenance"]["sha256"] == hashlib.sha256(source_path.read_bytes()).hexdigest()
-    assert record["content"] == {
-        "paragraphs": ["调查员档案"],
-        "tables": [[["姓名", "阿卡姆"]]],
-    }
+    assert record["content"]["paragraphs"][0]["text"] == "调查员档案"
+    assert record["content"]["paragraphs"][0]["provenance"]["locator"] == "paragraph:1"
+    assert record["content"]["tables"][0]["rows"] == [["姓名", "阿卡姆"]]
+    assert record["content"]["tables"][0]["provenance"]["locator"] == "table:1"
     assert "调查员档案" in (output_root / "records" / "coc7e.quickstart.zh-db-noart.md").read_text(
         encoding="utf-8"
     )
@@ -198,9 +198,10 @@ def test_full_run_extracts_pdf_text_by_page_with_page_provenance(tmp_path: Path)
     ]
     record_path = tmp_path / "generated-content" / "coc7" / "records" / "coc7e.core.zh-v1.2.1.json"
     record = json.loads(record_path.read_text(encoding="utf-8"))
-    assert record["content"]["pages"] == [
-        {"page_number": 1, "text": "First page"},
-        {"page_number": 2, "text": "Second page"},
+    assert [page["text"] for page in record["content"]["pages"]] == ["First page", "Second page"]
+    assert [page["provenance"]["locator"] for page in record["content"]["pages"]] == [
+        "page:1",
+        "page:2",
     ]
 
 
@@ -241,20 +242,20 @@ def test_full_run_reads_xlsm_cells_without_running_macros_or_external_links(tmp_
     )
     record_text = record_path.read_text(encoding="utf-8")
     record = json.loads(record_text)
-    assert record["content"] == {
-        "external_links_ignored": True,
-        "sheets": [
-            {
-                "cells": [
-                    {"coordinate": "A1", "value": "姓名"},
-                    {"coordinate": "B1", "value": "42"},
-                    {"coordinate": "C1", "formula": "SUM(B1:B1)", "value": "42"},
-                    {"coordinate": "D1", "value": "守秘人"},
-                ],
-                "name": "调查员",
-            }
-        ],
-    }
+    assert record["content"]["external_links_ignored"] is True
+    sheet = record["content"]["sheets"][0]
+    assert sheet["name"] == "调查员"
+    assert sheet["provenance"]["locator"] == "sheet:调查员"
+    assert [
+        {key: value for key, value in cell.items() if key != "provenance"}
+        for cell in sheet["cells"]
+    ] == [
+        {"coordinate": "A1", "value": "姓名"},
+        {"coordinate": "B1", "value": "42"},
+        {"coordinate": "C1", "formula": "SUM(B1:B1)", "value": "42"},
+        {"coordinate": "D1", "value": "守秘人"},
+    ]
+    assert sheet["cells"][0]["provenance"]["locator"] == "sheet:调查员!A1"
     assert "VBA-NEVER-EXECUTE" not in record_text
 
 
@@ -331,6 +332,280 @@ def test_full_run_rejects_a_source_changed_since_its_last_recorded_import(tmp_pa
     assert report["status"] == "failed"
     assert report["packs"][0]["errors"][0]["code"] == "changed_source"
     assert ingest_catalog(catalog_path, output_root=output_root)["status"] == "failed"
+
+
+def test_rejected_source_removes_stale_record_and_preserves_literal_docx_provenance(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "quickstart.docx"
+    _write_docx(source_path)
+    catalog_path = tmp_path / "catalog.json"
+    _write_catalog(
+        catalog_path,
+        [
+            {
+                "manifest": {
+                    "pack_id": "coc7e.quickstart.zh-db-noart",
+                    "title": "快速开始",
+                    "version": "test",
+                    "edition": "7e",
+                    "kind": "quickstart",
+                    "eras": ["gaslight"],
+                },
+                "source": {
+                    "original_absolute_path": str(source_path),
+                    "format": "docx",
+                    "page_count": None,
+                    "text_extraction": "ooxml",
+                    "contains_macros": False,
+                },
+            }
+        ],
+    )
+    output_root = tmp_path / "generated-content" / "coc7"
+    record_path = output_root / "records" / "coc7e.quickstart.zh-db-noart.json"
+
+    assert ingest_catalog(catalog_path, output_root=output_root)["status"] == "ready"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["provenance"] == {
+        "edition": "7e",
+        "eras": ["gaslight"],
+        "filename": "quickstart.docx",
+        "format": "docx",
+        "locator": "source",
+        "module": "quickstart",
+        "sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+        "source_pack": "coc7e.quickstart.zh-db-noart",
+        "source_path": str(source_path),
+    }
+    assert record["content"]["paragraphs"] == [
+        {
+            "provenance": {
+                "edition": "7e",
+                "eras": ["gaslight"],
+                "filename": "quickstart.docx",
+                "format": "docx",
+                "locator": "paragraph:1",
+                "module": "quickstart",
+                "sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+                "source_pack": "coc7e.quickstart.zh-db-noart",
+            },
+            "text": "调查员档案",
+        }
+    ]
+    assert record["content"]["tables"][0]["provenance"]["locator"] == "table:1"
+
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    catalog["packs"][0]["source"]["sha256"] = "0" * 64
+    catalog_path.write_text(json.dumps(catalog, ensure_ascii=False), encoding="utf-8")
+
+    assert ingest_catalog(catalog_path, output_root=output_root)["status"] == "failed"
+    assert not record_path.exists()
+    assert not record_path.with_suffix(".md").exists()
+
+
+def test_source_declaration_mismatches_are_rejected_before_record_output(tmp_path: Path) -> None:
+    source_path = tmp_path / "quickstart.docx"
+    _write_docx(source_path)
+    catalog_path = tmp_path / "catalog.json"
+    _write_catalog(
+        catalog_path,
+        [
+            {
+                "manifest": {
+                    "pack_id": "coc7e.quickstart.zh-db-noart",
+                    "title": "快速开始",
+                    "version": "test",
+                    "edition": "7e",
+                    "kind": "quickstart",
+                },
+                "source": {
+                    "original_absolute_path": str(source_path),
+                    "format": "docx",
+                    "page_count": 1,
+                    "text_extraction": "direct",
+                    "contains_macros": True,
+                },
+            }
+        ],
+    )
+
+    report = ingest_catalog(catalog_path, output_root=tmp_path / "generated-content" / "coc7")
+
+    assert report["status"] == "failed"
+    assert [error["code"] for error in report["packs"][0]["errors"]] == [
+        "page_count_mismatch",
+        "text_extraction_mismatch",
+        "macro_declaration_mismatch",
+    ]
+
+
+def test_checksum_read_failure_is_saved_as_an_unreadable_source_report(tmp_path: Path) -> None:
+    source_path = tmp_path / "quickstart.docx"
+    _write_docx(source_path)
+    catalog_path = tmp_path / "catalog.json"
+    _write_catalog(
+        catalog_path,
+        [
+            {
+                "manifest": {
+                    "pack_id": "coc7e.quickstart.zh-db-noart",
+                    "title": "快速开始",
+                    "version": "test",
+                    "edition": "7e",
+                    "kind": "quickstart",
+                },
+                "source": {
+                    "original_absolute_path": str(source_path),
+                    "format": "docx",
+                    "contains_macros": False,
+                },
+            }
+        ],
+    )
+    source_path.chmod(0)
+    output_root = tmp_path / "generated-content" / "coc7"
+    try:
+        report = ingest_catalog(catalog_path, output_root=output_root)
+    finally:
+        source_path.chmod(0o600)
+
+    assert report["status"] == "failed"
+    assert report["packs"][0]["errors"][0]["code"] == "unreadable_source"
+    assert (
+        json.loads((output_root / "ingestion-report.json").read_text(encoding="utf-8"))["status"]
+        == "failed"
+    )
+
+
+def test_pdf_with_a_blank_page_preserves_the_blank_page_when_other_text_exists(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "core.pdf"
+    _write_pdf(source_path, ["Readable page", ""])
+    catalog_path = tmp_path / "catalog.json"
+    _write_catalog(
+        catalog_path,
+        [
+            {
+                "manifest": {
+                    "pack_id": "coc7e.core.zh-v1.2.1",
+                    "title": "核心规则",
+                    "version": "test",
+                    "edition": "7e",
+                    "kind": "core",
+                },
+                "source": {
+                    "original_absolute_path": str(source_path),
+                    "format": "pdf",
+                    "page_count": 2,
+                    "text_extraction": "direct",
+                    "contains_macros": False,
+                },
+            }
+        ],
+    )
+
+    report = ingest_catalog(catalog_path, output_root=tmp_path / "generated-content" / "coc7")
+
+    assert report["status"] == "ready"
+    record_path = tmp_path / "generated-content" / "coc7" / "records" / "coc7e.core.zh-v1.2.1.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["content"]["pages"][1]["text"] == ""
+    assert record["content"]["pages"][1]["provenance"]["locator"] == "page:2"
+
+
+def test_pdf_without_text_on_any_page_is_rejected(tmp_path: Path) -> None:
+    source_path = tmp_path / "core.pdf"
+    _write_pdf(source_path, ["", ""])
+    catalog_path = tmp_path / "catalog.json"
+    _write_catalog(
+        catalog_path,
+        [
+            {
+                "manifest": {
+                    "pack_id": "coc7e.core.zh-v1.2.1",
+                    "title": "核心规则",
+                    "version": "test",
+                    "edition": "7e",
+                    "kind": "core",
+                },
+                "source": {
+                    "original_absolute_path": str(source_path),
+                    "format": "pdf",
+                    "contains_macros": False,
+                },
+            }
+        ],
+    )
+
+    report = ingest_catalog(catalog_path, output_root=tmp_path / "generated-content" / "coc7")
+
+    assert report["status"] == "failed"
+    assert report["packs"][0]["errors"][0]["code"] == "unreadable_source"
+
+
+def test_malformed_catalog_is_a_saved_machine_readable_failure(tmp_path: Path) -> None:
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text("{invalid", encoding="utf-8")
+    output_root = tmp_path / "generated-content" / "coc7"
+
+    report = ingest_catalog(catalog_path, output_root=output_root)
+
+    assert report == {
+        "catalog_version": None,
+        "dry_run": False,
+        "errors": [{"code": "invalid_catalog_json", "message": "catalog JSON is unreadable"}],
+        "packs": [],
+        "ruleset": None,
+        "status": "failed",
+    }
+    assert json.loads((output_root / "ingestion-report.json").read_text(encoding="utf-8")) == report
+
+
+def test_non_object_catalog_top_level_is_a_machine_readable_failure(tmp_path: Path) -> None:
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text("[]", encoding="utf-8")
+
+    report = ingest_catalog(catalog_path, output_root=tmp_path / "generated-content" / "coc7")
+
+    assert report["status"] == "failed"
+    assert report["errors"] == [
+        {"code": "invalid_catalog", "message": "catalog top level must be an object"}
+    ]
+
+
+def test_removed_pack_cannot_leave_a_previous_generated_record_usable(tmp_path: Path) -> None:
+    source_path = tmp_path / "quickstart.docx"
+    _write_docx(source_path)
+    catalog_path = tmp_path / "catalog.json"
+    _write_catalog(
+        catalog_path,
+        [
+            {
+                "manifest": {
+                    "pack_id": "coc7e.quickstart.zh-db-noart",
+                    "title": "快速开始",
+                    "version": "test",
+                    "edition": "7e",
+                    "kind": "quickstart",
+                },
+                "source": {
+                    "original_absolute_path": str(source_path),
+                    "format": "docx",
+                    "contains_macros": False,
+                },
+            }
+        ],
+    )
+    output_root = tmp_path / "generated-content" / "coc7"
+    record_path = output_root / "records" / "coc7e.quickstart.zh-db-noart.json"
+    assert ingest_catalog(catalog_path, output_root=output_root)["status"] == "ready"
+    _write_catalog(catalog_path, [])
+
+    assert ingest_catalog(catalog_path, output_root=output_root)["status"] == "ready"
+    assert not record_path.exists()
+    assert not record_path.with_suffix(".md").exists()
 
 
 def test_cli_dry_run_and_full_run_report_missing_unsupported_and_unreadable_sources(

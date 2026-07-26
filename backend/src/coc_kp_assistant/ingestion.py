@@ -39,19 +39,40 @@ def ingest_catalog(
     dry_run: bool = False,
 ) -> dict[str, object]:
     """Read registered local sources and emit deterministic, local-only records."""
-    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    try:
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return _catalog_failure(
+            output_root, dry_run, "invalid_catalog_json", "catalog JSON is unreadable"
+        )
+    if not isinstance(catalog, dict):
+        return _catalog_failure(
+            output_root, dry_run, "invalid_catalog", "catalog top level must be an object"
+        )
     catalog_errors = _validate_catalog(catalog)
+    if catalog_errors:
+        catalog_failure_report: dict[str, object] = {
+            "catalog_version": catalog.get("catalog_version"),
+            "dry_run": dry_run,
+            "errors": catalog_errors,
+            "packs": [],
+            "ruleset": catalog.get("ruleset"),
+            "status": "failed",
+        }
+        if not dry_run:
+            _write_outputs(output_root, [], catalog_failure_report)
+        return catalog_failure_report
     previous_checksums = _previous_checksums(output_root)
     pack_reports: list[dict[str, object]] = []
     records: list[tuple[str, dict[str, object]]] = []
 
-    for item in sorted(catalog.get("packs", []), key=lambda pack: str(pack["manifest"]["pack_id"])):
+    for item in sorted(catalog["packs"], key=_catalog_pack_sort_key):
         pack_report, record = _ingest_pack(item, previous_checksums)
         pack_reports.append(pack_report)
         if record is not None:
             records.append((str(record["pack_id"]), record))
 
-    all_errors = catalog_errors or any(pack["status"] == "rejected" for pack in pack_reports)
+    all_errors = any(pack["status"] == "rejected" for pack in pack_reports)
     report: dict[str, object] = {
         "catalog_version": catalog.get("catalog_version"),
         "dry_run": dry_run,
@@ -59,12 +80,34 @@ def ingest_catalog(
         "ruleset": catalog.get("ruleset"),
         "status": "failed" if all_errors else "ready",
     }
-    if catalog_errors:
-        report["errors"] = catalog_errors
-
     if not dry_run:
         _write_outputs(output_root, records, report)
     return report
+
+
+def _catalog_failure(
+    output_root: Path, dry_run: bool, code: str, message: str
+) -> dict[str, object]:
+    report: dict[str, object] = {
+        "catalog_version": None,
+        "dry_run": dry_run,
+        "errors": [{"code": code, "message": message}],
+        "packs": [],
+        "ruleset": None,
+        "status": "failed",
+    }
+    if not dry_run:
+        _write_outputs(output_root, [], report)
+    return report
+
+
+def _catalog_pack_sort_key(item: object) -> str:
+    if not isinstance(item, dict):
+        return ""
+    manifest = item.get("manifest")
+    if not isinstance(manifest, dict):
+        return ""
+    return str(manifest.get("pack_id", ""))
 
 
 def _validate_catalog(catalog: dict[str, Any]) -> list[dict[str, str]]:
@@ -106,8 +149,12 @@ def _previous_checksums(output_root: Path) -> dict[str, str]:
 
 
 def _ingest_pack(
-    item: dict[str, Any], previous_checksums: dict[str, str]
+    item: object, previous_checksums: dict[str, str]
 ) -> tuple[dict[str, object], dict[str, object] | None]:
+    if not isinstance(item, dict):
+        return _rejected_report(
+            "unknown", "invalid_catalog_entry", "catalog pack must be an object"
+        ), None
     manifest_data = item.get("manifest")
     source = item.get("source")
     if not isinstance(manifest_data, dict) or not isinstance(source, dict):
@@ -152,7 +199,10 @@ def _ingest_pack(
             manifest.pack_id, "missing_source", "source file does not exist"
         ), None
 
-    checksum = _sha256(source_path)
+    try:
+        checksum = _sha256(source_path)
+    except OSError as error:
+        return _rejected_report(manifest.pack_id, "unreadable_source", str(error)), None
     expected_checksum = source.get("sha256") or previous_checksums.get(manifest.pack_id)
     if expected_checksum is not None and expected_checksum != checksum:
         return (
@@ -168,7 +218,9 @@ def _ingest_pack(
             None,
         )
     try:
-        content = _extract(source_path, source_format)
+        provenance = _source_provenance(manifest, source_path, source_format, checksum)
+        content = _extract(source_path, source_format, provenance)
+        declaration_errors = _source_declaration_errors(source, source_path, source_format, content)
     except (
         BadZipFile,
         ElementTree.ParseError,
@@ -178,6 +230,12 @@ def _ingest_pack(
         KeyError,
     ) as error:
         return _rejected_report(manifest.pack_id, "unreadable_source", str(error)), None
+    if declaration_errors:
+        return {
+            "errors": declaration_errors,
+            "pack_id": manifest.pack_id,
+            "status": "rejected",
+        }, None
 
     record: dict[str, object] = {
         "content": content,
@@ -188,10 +246,8 @@ def _ingest_pack(
         "kind": manifest.kind.value,
         "pack_id": manifest.pack_id,
         "provenance": {
-            "filename": source_path.name,
-            "format": source_format,
-            "sha256": checksum,
-            "source_path": str(source_path),
+            **provenance,
+            "locator": "source",
         },
         "ruleset": manifest.ruleset,
         "title": manifest.title,
@@ -224,29 +280,105 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _extract(path: Path, source_format: str) -> dict[str, object]:
+def _source_provenance(
+    manifest: SourcePackManifest, source_path: Path, source_format: str, checksum: str
+) -> dict[str, object]:
+    return {
+        "edition": manifest.edition,
+        "eras": list(manifest.eras),
+        "filename": source_path.name,
+        "format": source_format,
+        "module": manifest.kind.value,
+        "sha256": checksum,
+        "source_pack": manifest.pack_id,
+        "source_path": str(source_path),
+    }
+
+
+def _unit_provenance(provenance: dict[str, object], locator: str) -> dict[str, object]:
+    return {key: value for key, value in provenance.items() if key != "source_path"} | {
+        "locator": locator
+    }
+
+
+def _source_declaration_errors(
+    source: dict[str, Any], source_path: Path, source_format: str, content: dict[str, object]
+) -> list[dict[str, str]]:
+    errors: list[dict[str, str]] = []
+    pages = content.get("pages")
+    actual_page_count = len(pages) if source_format == "pdf" and isinstance(pages, list) else None
+    if "page_count" in source and source["page_count"] != actual_page_count:
+        errors.append(
+            {
+                "code": "page_count_mismatch",
+                "message": "declared page_count does not match the readable source",
+            }
+        )
+    expected_text_extraction = {
+        "pdf": "direct",
+        "docx": "ooxml",
+        "xlsx": "ooxml",
+        "xlsm": "ooxml-without-vba",
+    }[source_format]
+    if "text_extraction" in source and source["text_extraction"] != expected_text_extraction:
+        errors.append(
+            {
+                "code": "text_extraction_mismatch",
+                "message": "declared text_extraction does not match the source format",
+            }
+        )
+    actual_contains_macros = _contains_macros(source_path, source_format)
+    if "contains_macros" in source and source["contains_macros"] is not actual_contains_macros:
+        errors.append(
+            {
+                "code": "macro_declaration_mismatch",
+                "message": "declared macro presence does not match the source",
+            }
+        )
+    return errors
+
+
+def _contains_macros(path: Path, source_format: str) -> bool:
+    if source_format != "xlsm":
+        return False
+    with ZipFile(path) as archive:
+        return "xl/vbaProject.bin" in archive.namelist()
+
+
+def _extract(path: Path, source_format: str, provenance: dict[str, object]) -> dict[str, object]:
     if source_format == "pdf":
-        return _extract_pdf(path)
+        return _extract_pdf(path, provenance)
     if source_format == "docx":
-        return _extract_docx(path)
+        return _extract_docx(path, provenance)
     if source_format in {"xlsx", "xlsm"}:
-        return _extract_workbook(path)
+        return _extract_workbook(path, provenance)
     raise ValueError(f"source format is unsupported: {source_format}")
 
 
-def _extract_docx(path: Path) -> dict[str, object]:
+def _extract_docx(path: Path, provenance: dict[str, object]) -> dict[str, object]:
     with ZipFile(path) as archive:
         root = ElementTree.fromstring(archive.read("word/document.xml"))
     body = root.find(f"{_WORD_NS}body")
     if body is None:
         raise ValueError("DOCX document body is missing")
-    paragraphs = [_word_text(element) for element in body.findall(f"{_WORD_NS}p")]
+    paragraphs = [
+        {
+            "provenance": _unit_provenance(provenance, f"paragraph:{index}"),
+            "text": _word_text(element),
+        }
+        for index, element in enumerate(body.findall(f"{_WORD_NS}p"), start=1)
+    ]
     tables = []
-    for table in body.findall(f"{_WORD_NS}tbl"):
+    for table_index, table in enumerate(body.findall(f"{_WORD_NS}tbl"), start=1):
         rows = []
         for row in table.findall(f"{_WORD_NS}tr"):
             rows.append([_word_text(cell) for cell in row.findall(f"{_WORD_NS}tc")])
-        tables.append(rows)
+        tables.append(
+            {
+                "provenance": _unit_provenance(provenance, f"table:{table_index}"),
+                "rows": rows,
+            }
+        )
     return {"paragraphs": paragraphs, "tables": tables}
 
 
@@ -254,7 +386,7 @@ def _word_text(element: ElementTree.Element) -> str:
     return "".join(text.text or "" for text in element.iter(f"{_WORD_NS}t"))
 
 
-def _extract_pdf(path: Path) -> dict[str, object]:
+def _extract_pdf(path: Path, provenance: dict[str, object]) -> dict[str, object]:
     pdfinfo = shutil.which("pdfinfo")
     pdftotext = shutil.which("pdftotext")
     if pdfinfo is None or pdftotext is None:
@@ -278,13 +410,21 @@ def _extract_pdf(path: Path) -> dict[str, object]:
             check=False,
         )
         page_text = text_result.stdout.strip()
-        if text_result.returncode != 0 or not page_text:
+        if text_result.returncode != 0:
             raise ValueError(f"PDF page {page_number} has no readable text layer")
-        pages.append({"page_number": page_number, "text": page_text})
+        pages.append(
+            {
+                "page_number": page_number,
+                "provenance": _unit_provenance(provenance, f"page:{page_number}"),
+                "text": page_text,
+            }
+        )
+    if not any(page["text"] for page in pages):
+        raise ValueError("PDF has no readable text layer")
     return {"pages": pages}
 
 
-def _extract_workbook(path: Path) -> dict[str, object]:
+def _extract_workbook(path: Path, provenance: dict[str, object]) -> dict[str, object]:
     with ZipFile(path) as archive:
         workbook = ElementTree.fromstring(archive.read("xl/workbook.xml"))
         relationships = _workbook_relationships(archive)
@@ -296,10 +436,18 @@ def _extract_workbook(path: Path) -> dict[str, object]:
             if target is None:
                 raise ValueError("worksheet relationship is missing")
             sheet_root = ElementTree.fromstring(archive.read(target))
+            sheet_name = sheet.get("name", "")
             cells = [
-                _cell_value(cell, shared_strings) for cell in sheet_root.findall(f".//{_SHEET_NS}c")
+                _cell_value(cell, shared_strings, provenance, sheet_name)
+                for cell in sheet_root.findall(f".//{_SHEET_NS}c")
             ]
-            sheets.append({"cells": cells, "name": sheet.get("name", "")})
+            sheets.append(
+                {
+                    "cells": cells,
+                    "name": sheet_name,
+                    "provenance": _unit_provenance(provenance, f"sheet:{sheet_name}"),
+                }
+            )
         external_links_ignored = any(
             name.startswith("xl/externalLinks/") for name in archive.namelist()
         )
@@ -329,7 +477,12 @@ def _shared_strings(archive: ZipFile) -> list[str]:
     return ["".join(text.text or "" for text in item.iter(f"{_SHEET_NS}t")) for item in root]
 
 
-def _cell_value(cell: ElementTree.Element, shared_strings: list[str]) -> dict[str, object]:
+def _cell_value(
+    cell: ElementTree.Element,
+    shared_strings: list[str],
+    provenance: dict[str, object],
+    sheet_name: str,
+) -> dict[str, object]:
     cell_type = cell.get("t")
     value_element = cell.find(f"{_SHEET_NS}v")
     raw_value = value_element.text if value_element is not None else None
@@ -342,7 +495,12 @@ def _cell_value(cell: ElementTree.Element, shared_strings: list[str]) -> dict[st
     else:
         value = raw_value
     formula = cell.find(f"{_SHEET_NS}f")
-    result: dict[str, object] = {"coordinate": cell.get("r", ""), "value": value}
+    coordinate = cell.get("r", "")
+    result: dict[str, object] = {
+        "coordinate": coordinate,
+        "provenance": _unit_provenance(provenance, f"sheet:{sheet_name}!{coordinate}"),
+        "value": value,
+    }
     if formula is not None and formula.text is not None:
         result["formula"] = formula.text
     return result
@@ -353,6 +511,9 @@ def _write_outputs(
 ) -> None:
     records_root = output_root / "records"
     records_root.mkdir(parents=True, exist_ok=True)
+    for existing_record in records_root.iterdir():
+        if existing_record.is_file() and existing_record.suffix in {".json", ".md"}:
+            existing_record.unlink()
     for pack_id, record in records:
         _write_json(records_root / f"{pack_id}.json", record)
         (records_root / f"{pack_id}.md").write_text(_record_markdown(record), encoding="utf-8")
