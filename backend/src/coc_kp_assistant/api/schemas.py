@@ -79,6 +79,7 @@ class DifficultyLabel(StrEnum):
 
 class RecordedRollRequest(DomainModel):
     campaign_id: UUID
+    case_session_id: UUID | None = None
     investigator_id: UUID | None = None
     skill_key: str | None = Field(default=None, max_length=80)
     label: str = Field(min_length=1, max_length=160)
@@ -97,6 +98,7 @@ class RecordedRollRequest(DomainModel):
 class RecordedRollResponse(DomainModel):
     roll_id: UUID
     campaign_id: UUID
+    case_session_id: UUID | None
     investigator_id: UUID | None
     skill_key: str | None
     label: str
@@ -182,25 +184,29 @@ class SanityLossRequest(DomainModel):
     expected_version: int = Field(ge=1)
     loss: int = Field(ge=0, le=100)
     reason: str = Field(min_length=1, max_length=300)
-    session_key: str = Field(min_length=1, max_length=120)
-    case_session_id: UUID | None = None
-    intelligence_check_passed: bool | None = None
+    session_key: str | None = Field(default=None, max_length=120)
+    case_session_id: UUID
+    intelligence_roll_id: UUID | None = None
 
 
 class InjuryRequest(DomainModel):
     expected_version: int = Field(ge=1)
-    damage: int = Field(ge=0, le=100)
+    damage: int = Field(ge=1, le=100)
     reason: str = Field(min_length=1, max_length=300)
     session_key: str | None = Field(default=None, max_length=120)
-    case_session_id: UUID | None = None
+    case_session_id: UUID
 
 
 class RecoveryRequest(DomainModel):
     expected_version: int = Field(ge=1)
     care_type: str = Field(pattern=r"^(first_aid|medicine|natural)$")
+    injury_id: UUID
     healing_roll: int | None = Field(default=None, ge=1, le=3)
+    medicine_roll_id: UUID | None = None
+    constitution_roll_id: UUID | None = None
+    period_key: str | None = Field(default=None, min_length=1, max_length=120)
     session_key: str | None = Field(default=None, max_length=120)
-    case_session_id: UUID | None = None
+    case_session_id: UUID
 
 
 class CombatRequest(DomainModel):
@@ -211,7 +217,7 @@ class CombatRequest(DomainModel):
     weapon_key: str = Field(min_length=1, max_length=80)
     rolled_damage: int = Field(ge=0, le=100)
     session_key: str | None = Field(default=None, max_length=120)
-    case_session_id: UUID | None = None
+    case_session_id: UUID
 
     @model_validator(mode="after")
     def distinct_participants(self) -> "CombatRequest":
@@ -231,6 +237,7 @@ class EngineOperationResponse(DomainModel):
     session_sanity_loss: int | None = None
     reason: str | None = None
     damage_applied: int | None = None
+    injury_id: UUID | None = None
     healed: int | None = None
     care_type: str | None = None
     hit: bool | None = None

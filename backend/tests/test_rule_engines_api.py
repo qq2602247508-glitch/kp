@@ -68,9 +68,32 @@ def assert_cited(response: dict[str, object]) -> None:
     assert citation["citation_id"].startswith("coc7e.core.")
 
 
+def create_case_session(client: object, campaign_id: str) -> str:
+    response = client.post(  # type: ignore[attr-defined]
+        f"/api/v1/campaigns/{campaign_id}/case-state/sessions",
+        json={"title": "第一夜", "player_visible_text": "", "keeper_truth": "测试"},
+    )
+    assert response.status_code == 201
+    return response.json()["entity_id"]
+
+
 def test_sanity_loss_is_deterministic_versioned_cited_and_logged(client) -> None:
     campaign_id, investigator, _ = setup_pair(client)
     investigator_id = investigator["investigator_id"]
+    case_session_id = create_case_session(client, campaign_id)
+    intelligence_roll = client.post(
+        "/api/v1/rolls",
+        json={
+            "campaign_id": campaign_id,
+            "case_session_id": case_session_id,
+            "investigator_id": investigator_id,
+            "skill_key": "intelligence",
+            "label": "INT",
+            "target": 70,
+            "dice": {"units_digit": 1, "tens_digits": [2]},
+        },
+    )
+    assert intelligence_roll.status_code == 201
 
     first = client.post(
         f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/sanity-loss",
@@ -78,8 +101,8 @@ def test_sanity_loss_is_deterministic_versioned_cited_and_logged(client) -> None
             "expected_version": investigator["version"],
             "loss": 5,
             "reason": "目睹深海遗骸",
-            "session_key": "night-1",
-            "intelligence_check_passed": True,
+            "case_session_id": case_session_id,
+            "intelligence_roll_id": intelligence_roll.json()["roll_id"],
         },
     )
     assert first.status_code == 200, first.text
@@ -95,8 +118,7 @@ def test_sanity_loss_is_deterministic_versioned_cited_and_logged(client) -> None
             "expected_version": investigator["version"],
             "loss": 1,
             "reason": "过期写入",
-            "session_key": "night-1",
-            "intelligence_check_passed": False,
+            "case_session_id": case_session_id,
         },
     )
     assert stale.status_code == 409
@@ -107,8 +129,8 @@ def test_sanity_loss_is_deterministic_versioned_cited_and_logged(client) -> None
             "expected_version": first_result["investigator"]["version"],
             "loss": 7,
             "reason": "听见不可名状的低语",
-            "session_key": "night-1",
-            "intelligence_check_passed": True,
+            "case_session_id": case_session_id,
+            "intelligence_roll_id": intelligence_roll.json()["roll_id"],
         },
     )
     assert second.status_code == 200, second.text
@@ -126,6 +148,7 @@ def test_sanity_loss_is_deterministic_versioned_cited_and_logged(client) -> None
 def test_injury_recovery_and_combat_use_native_weapon_policy(client) -> None:
     campaign_id, attacker, target = setup_pair(client)
     target_id = target["investigator_id"]
+    case_session_id = create_case_session(client, campaign_id)
 
     weapons = client.get("/api/v1/rule-engines/weapons")
     assert weapons.status_code == 200
@@ -138,6 +161,7 @@ def test_injury_recovery_and_combat_use_native_weapon_policy(client) -> None:
             "expected_version": target["version"],
             "damage": 6,
             "reason": "坠落",
+            "case_session_id": case_session_id,
         },
     )
     assert injury.status_code == 200, injury.text
@@ -151,6 +175,8 @@ def test_injury_recovery_and_combat_use_native_weapon_policy(client) -> None:
         json={
             "expected_version": injury_result["investigator"]["version"],
             "care_type": "first_aid",
+            "injury_id": injury_result["injury_id"],
+            "case_session_id": case_session_id,
         },
     )
     assert recovery.status_code == 200, recovery.text
@@ -164,6 +190,8 @@ def test_injury_recovery_and_combat_use_native_weapon_policy(client) -> None:
         json={
             "expected_version": recovery_result["investigator"]["version"],
             "care_type": "first_aid",
+            "injury_id": injury_result["injury_id"],
+            "case_session_id": case_session_id,
         },
     )
     assert repeated_first_aid.status_code == 422
@@ -172,6 +200,7 @@ def test_injury_recovery_and_combat_use_native_weapon_policy(client) -> None:
         "/api/v1/rolls",
         json={
             "campaign_id": campaign_id,
+            "case_session_id": case_session_id,
             "investigator_id": attacker["investigator_id"],
             "skill_key": "fighting_brawl",
             "label": "斗殴攻击",
@@ -192,6 +221,7 @@ def test_injury_recovery_and_combat_use_native_weapon_policy(client) -> None:
             "attack_roll_id": roll.json()["roll_id"],
             "weapon_key": "unarmed",
             "rolled_damage": 3,
+            "case_session_id": case_session_id,
         },
     )
     assert combat.status_code == 200, combat.text
@@ -200,6 +230,64 @@ def test_injury_recovery_and_combat_use_native_weapon_policy(client) -> None:
     assert combat_result["damage_applied"] == 3
     assert combat_result["target"]["hit_points"] == 3
     assert_cited(combat_result)
+
+
+def test_rule_engines_reject_forged_rolls_replays_and_zero_injuries(client) -> None:
+    campaign_id, attacker, target = setup_pair(client)
+    case_session_id = create_case_session(client, campaign_id)
+    target_id = target["investigator_id"]
+
+    zero = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{target_id}/injury",
+        json={
+            "expected_version": target["version"],
+            "damage": 0,
+            "reason": "伪造",
+            "case_session_id": case_session_id,
+        },
+    )
+    assert zero.status_code == 422
+
+    forged_target = client.post(
+        "/api/v1/rolls",
+        json={
+            "campaign_id": campaign_id,
+            "case_session_id": case_session_id,
+            "investigator_id": attacker["investigator_id"],
+            "skill_key": "fighting_brawl",
+            "label": "伪造 100",
+            "target": 100,
+            "dice": {"units_digit": 1, "tens_digits": [1]},
+        },
+    )
+    assert forged_target.status_code == 201
+    forged_combat = {
+        "attacker_id": attacker["investigator_id"],
+        "target_id": target_id,
+        "target_expected_version": target["version"],
+        "attack_roll_id": forged_target.json()["roll_id"],
+        "weapon_key": "unarmed",
+        "rolled_damage": 1,
+        "case_session_id": case_session_id,
+    }
+    combat_url = f"/api/v1/campaigns/{campaign_id}/combat/resolve"
+    assert client.post(combat_url, json=forged_combat).status_code == 422
+
+    valid_roll = client.post(
+        "/api/v1/rolls",
+        json={
+            "campaign_id": campaign_id,
+            "case_session_id": case_session_id,
+            "investigator_id": attacker["investigator_id"],
+            "skill_key": "fighting_brawl",
+            "label": "斗殴",
+            "target": 55,
+            "dice": {"units_digit": 1, "tens_digits": [1]},
+        },
+    )
+    valid_combat = {**forged_combat, "attack_roll_id": valid_roll.json()["roll_id"]}
+    assert client.post(combat_url, json=valid_combat).status_code == 200
+    assert client.post(combat_url, json=valid_combat).status_code == 422
 
 
 def test_chase_state_uses_optimistic_lock_and_logs_cited_advances(client) -> None:
@@ -252,9 +340,7 @@ def test_chase_state_uses_optimistic_lock_and_logs_cited_advances(client) -> Non
     assert advanced.status_code == 200, advanced.text
     result = advanced.json()
     assert result["version"] == 2
-    positions = {
-        entry["investigator_id"]: entry["position"] for entry in result["participants"]
-    }
+    positions = {entry["investigator_id"]: entry["position"] for entry in result["participants"]}
     assert positions[first["investigator_id"]] == 1
     assert positions[second["investigator_id"]] == 3
     assert_cited(result)
@@ -263,9 +349,7 @@ def test_chase_state_uses_optimistic_lock_and_logs_cited_advances(client) -> Non
         f"/api/v1/campaigns/{campaign_id}/chases/{chase['chase_id']}/advance",
         json={
             "expected_version": 1,
-            "moves": [
-                {"investigator_id": first["investigator_id"], "move_units": 1}
-            ],
+            "moves": [{"investigator_id": first["investigator_id"], "move_units": 1}],
         },
     )
     assert stale.status_code == 409

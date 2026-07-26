@@ -1,3 +1,4 @@
+import re
 from typing import Any, cast
 from uuid import UUID
 
@@ -91,15 +92,71 @@ def _validate_case_session(
 ) -> None:
     if case_session_id is None:
         return
-    if session.scalar(
-        select(CaseSessionRecord.id).where(
-            CaseSessionRecord.id == str(case_session_id),
-            CaseSessionRecord.campaign_id == str(campaign_id),
+    if (
+        session.scalar(
+            select(CaseSessionRecord.id).where(
+                CaseSessionRecord.id == str(case_session_id),
+                CaseSessionRecord.campaign_id == str(campaign_id),
+            )
         )
-    ) is None:
+        is None
+    ):
+        raise InvalidRuleOperationError("case session does not belong to this campaign")
+
+
+def _required_case_session(session: Session, campaign_id: UUID, case_session_id: UUID) -> None:
+    _validate_case_session(session, campaign_id, case_session_id)
+
+
+def _roll_for(
+    session: Session,
+    *,
+    roll_id: UUID,
+    campaign_id: UUID,
+    investigator_id: UUID,
+    case_session_id: UUID,
+    skill_key: str | None = None,
+    target: int | None = None,
+) -> RollRecord:
+    roll = session.scalar(
+        select(RollRecord).where(
+            RollRecord.id == str(roll_id),
+            RollRecord.campaign_id == str(campaign_id),
+            RollRecord.investigator_id == str(investigator_id),
+            RollRecord.case_session_id == str(case_session_id),
+        )
+    )
+    if roll is None:
         raise InvalidRuleOperationError(
-            "case session does not belong to this campaign"
+            "recorded roll does not match campaign, investigator, and case session"
         )
+    if skill_key is not None and roll.skill_key != skill_key:
+        raise InvalidRuleOperationError("recorded roll skill does not match the required check")
+    if target is not None and int(roll.request_data.get("target_value", -1)) != target:
+        raise InvalidRuleOperationError("recorded roll target does not match the current value")
+    return roll
+
+
+def _passed(roll: RollRecord) -> bool:
+    return bool(roll.resolution_data.get("passed", False))
+
+
+def _current_skill(record: InvestigatorRecord, skill_key: str) -> int:
+    for skill in record.skills:
+        if skill.skill_key == skill_key:
+            return skill.current_value
+    raise InvalidRuleOperationError("investigator does not have the required skill")
+
+
+def _damage_bonus_max(value: str) -> int:
+    if value == "0":
+        return 0
+    if re.fullmatch(r"-\d+", value):
+        return int(value)
+    match = re.fullmatch(r"\+?(\d+)[dD](\d+)", value)
+    if match:
+        return int(match.group(1)) * int(match.group(2))
+    raise InvalidRuleOperationError("unsupported damage bonus notation")
 
 
 def _claim_investigator(
@@ -121,36 +178,44 @@ def apply_sanity_loss(
     investigator_id: UUID,
     payload: SanityLossRequest,
 ) -> EngineOperationResponse:
-    _validate_case_session(session, campaign_id, payload.case_session_id)
-    if payload.loss >= 5 and payload.intelligence_check_passed is None:
-        raise InvalidRuleOperationError(
-            "a 5+ sanity loss requires the recorded INT check outcome"
-        )
+    _required_case_session(session, campaign_id, payload.case_session_id)
+    if payload.loss >= 5 and payload.intelligence_roll_id is None:
+        raise InvalidRuleOperationError("a 5+ sanity loss requires the recorded INT check outcome")
     record, before = _claim_investigator(
         session, campaign_id, investigator_id, payload.expected_version
     )
+    intelligence_passed: bool | None = None
+    if payload.intelligence_roll_id is not None:
+        intelligence_roll = _roll_for(
+            session,
+            roll_id=payload.intelligence_roll_id,
+            campaign_id=campaign_id,
+            investigator_id=investigator_id,
+            case_session_id=payload.case_session_id,
+            skill_key="intelligence",
+            target=record.intelligence,
+        )
+        intelligence_passed = _passed(intelligence_roll)
     prior = session.scalars(
         select(RuleOperationRecord)
         .where(
             RuleOperationRecord.campaign_id == str(campaign_id),
             RuleOperationRecord.subject_id == str(investigator_id),
-            RuleOperationRecord.session_key == payload.session_key,
+            RuleOperationRecord.case_session_id == str(payload.case_session_id),
             RuleOperationRecord.operation_type == "sanity_loss",
         )
         .order_by(RuleOperationRecord.created_at, RuleOperationRecord.id)
     ).all()
     applied_loss = min(record.sanity, payload.loss)
     session_loss = sum(int(item.output_data.get("loss", 0)) for item in prior) + applied_loss
-    daily_start_sanity = (
-        int(prior[0].output_data["sanity_before"]) if prior else record.sanity
-    )
+    daily_start_sanity = int(prior[0].output_data["sanity_before"]) if prior else record.sanity
     record.sanity -= applied_loss
     record.conditions = sorted(
         sanity_conditions(
             starting_sanity=daily_start_sanity,
             single_loss=applied_loss,
             session_loss=session_loss,
-            intelligence_check_passed=payload.intelligence_check_passed,
+            intelligence_check_passed=intelligence_passed,
             existing=set(record.conditions),
         )
     )
@@ -193,7 +258,7 @@ def apply_injury(
     investigator_id: UUID,
     payload: InjuryRequest,
 ) -> EngineOperationResponse:
-    _validate_case_session(session, campaign_id, payload.case_session_id)
+    _required_case_session(session, campaign_id, payload.case_session_id)
     record, before = _claim_investigator(
         session, campaign_id, investigator_id, payload.expected_version
     )
@@ -217,6 +282,8 @@ def apply_injury(
         output_data=output,
         citation=INJURY_CITATION.as_dict(),
     )
+    output["injury_id"] = operation.id
+    operation.output_data = output
     session.flush()
     service._audit(
         session,
@@ -239,47 +306,85 @@ def apply_recovery(
     investigator_id: UUID,
     payload: RecoveryRequest,
 ) -> EngineOperationResponse:
-    _validate_case_session(session, campaign_id, payload.case_session_id)
-    try:
-        healing = recovery_amount(payload.care_type, payload.healing_roll)
-    except ValueError as error:
-        raise InvalidRuleOperationError(str(error)) from error
-    if payload.care_type == "first_aid":
-        recent = session.scalars(
-            select(RuleOperationRecord)
-            .where(
-                RuleOperationRecord.campaign_id == str(campaign_id),
-                RuleOperationRecord.subject_id == str(investigator_id),
-                RuleOperationRecord.operation_type.in_(("injury", "combat", "recovery")),
-            )
-            .order_by(
-                RuleOperationRecord.created_at.desc(),
-                RuleOperationRecord.id.desc(),
-            )
-        ).all()
-        for item in recent:
-            if item.operation_type == "injury" or (
-                item.operation_type == "combat"
-                and int(item.output_data.get("damage_applied", 0)) > 0
-            ):
-                break
-            if (
-                item.operation_type == "recovery"
-                and item.output_data.get("care_type") == "first_aid"
-            ):
-                raise InvalidRuleOperationError(
-                    "first aid may be applied only once to the current injury"
-                )
+    _required_case_session(session, campaign_id, payload.case_session_id)
+    injury = session.scalar(
+        select(RuleOperationRecord).where(
+            RuleOperationRecord.id == str(payload.injury_id),
+            RuleOperationRecord.campaign_id == str(campaign_id),
+            RuleOperationRecord.subject_id == str(investigator_id),
+            RuleOperationRecord.operation_type == "injury",
+        )
+    )
+    if injury is None or int(injury.output_data.get("damage_applied", 0)) <= 0:
+        raise InvalidRuleOperationError(
+            "injury_id must identify a damaging injury for this investigator"
+        )
+    duplicate_care = select(RuleOperationRecord.id).where(
+        RuleOperationRecord.campaign_id == str(campaign_id),
+        RuleOperationRecord.subject_id == str(investigator_id),
+        RuleOperationRecord.operation_type == "recovery",
+        RuleOperationRecord.input_data["injury_id"].as_string() == str(payload.injury_id),
+        RuleOperationRecord.output_data["care_type"].as_string() == payload.care_type,
+    )
+    if session.scalar(duplicate_care) is not None:
+        raise InvalidRuleOperationError("this care type has already been applied to the injury")
     record, before = _claim_investigator(
         session, campaign_id, investigator_id, payload.expected_version
     )
+    if "dying" in record.conditions:
+        raise InvalidRuleOperationError("ordinary recovery cannot treat a dying investigator")
+    if payload.care_type == "first_aid":
+        healing = 1
+    elif payload.care_type == "medicine":
+        if payload.medicine_roll_id is None:
+            raise InvalidRuleOperationError("medicine recovery requires a recorded medicine roll")
+        roll = _roll_for(
+            session,
+            roll_id=payload.medicine_roll_id,
+            campaign_id=campaign_id,
+            investigator_id=investigator_id,
+            case_session_id=payload.case_session_id,
+            skill_key="medicine",
+            target=_current_skill(record, "medicine"),
+        )
+        if not _passed(roll):
+            raise InvalidRuleOperationError("medicine roll must pass")
+        healing = recovery_amount("medicine", payload.healing_roll)
+    else:
+        if payload.constitution_roll_id is None or payload.period_key is None:
+            raise InvalidRuleOperationError(
+                "natural recovery requires a constitution roll and period key"
+            )
+        roll = _roll_for(
+            session,
+            roll_id=payload.constitution_roll_id,
+            campaign_id=campaign_id,
+            investigator_id=investigator_id,
+            case_session_id=payload.case_session_id,
+            target=record.constitution,
+        )
+        if not _passed(roll):
+            raise InvalidRuleOperationError("constitution roll must pass")
+        duplicate_period = select(RuleOperationRecord.id).where(
+            RuleOperationRecord.campaign_id == str(campaign_id),
+            RuleOperationRecord.subject_id == str(investigator_id),
+            RuleOperationRecord.operation_type == "recovery",
+            RuleOperationRecord.input_data["period_key"].as_string() == payload.period_key,
+        )
+        if session.scalar(duplicate_period) is not None:
+            raise InvalidRuleOperationError(
+                "natural recovery has already been applied for this period"
+            )
+        healing = recovery_amount("natural", payload.healing_roll)
     maximum_hit_points = (record.constitution + record.size) // 10
     healed = min(healing, maximum_hit_points - record.hit_points)
     record.hit_points += healed
+    conditions = set(record.conditions)
     if record.hit_points > 0:
-        record.conditions = sorted(
-            set(record.conditions).difference({"unconscious", "dying"})
-        )
+        conditions.discard("unconscious")
+    if record.hit_points >= (maximum_hit_points + 1) // 2:
+        conditions.discard("major_wound")
+    record.conditions = sorted(conditions)
     output = {"healed": healed, "care_type": payload.care_type}
     operation = _add_operation(
         session,
@@ -311,27 +416,37 @@ def apply_recovery(
 def resolve_combat(
     session: Session, campaign_id: UUID, payload: CombatRequest
 ) -> EngineOperationResponse:
-    _validate_case_session(session, campaign_id, payload.case_session_id)
+    _required_case_session(session, campaign_id, payload.case_session_id)
     weapon = WEAPON_BY_KEY.get(payload.weapon_key)
     if weapon is None:
         raise InvalidRuleOperationError("unknown COC7 weapon policy")
-    if (
-        not weapon.uses_damage_bonus
-        and payload.rolled_damage > weapon.maximum_rolled_damage
-    ):
+    attacker = session.scalar(service._investigator_query(campaign_id, payload.attacker_id))
+    if attacker is None:
+        raise service.EntityNotFoundError("investigator not found")
+    maximum_damage = weapon.maximum_rolled_damage
+    if weapon.uses_damage_bonus:
+        maximum_damage += _damage_bonus_max(attacker.damage_bonus)
+    if payload.rolled_damage > maximum_damage:
         raise InvalidRuleOperationError("rolled damage exceeds the weapon policy")
-    roll = session.scalar(
-        select(RollRecord).where(
-            RollRecord.id == str(payload.attack_roll_id),
-            RollRecord.campaign_id == str(campaign_id),
-            RollRecord.investigator_id == str(payload.attacker_id),
-        )
+    roll = _roll_for(
+        session,
+        roll_id=payload.attack_roll_id,
+        campaign_id=campaign_id,
+        investigator_id=payload.attacker_id,
+        case_session_id=payload.case_session_id,
+        skill_key=weapon.skill_key,
+        target=_current_skill(attacker, weapon.skill_key),
     )
-    if roll is None:
-        raise InvalidRuleOperationError("attack roll does not belong to this attacker")
-    if roll.skill_key != weapon.skill_key:
-        raise InvalidRuleOperationError("attack roll skill does not match the weapon policy")
-    hit = bool(roll.resolution_data.get("passed", False))
+    consumed_roll = select(RuleOperationRecord.id).where(
+        RuleOperationRecord.operation_type == "combat",
+        RuleOperationRecord.output_data["attack_roll_id"].as_string()
+        == str(payload.attack_roll_id),
+    )
+    if session.scalar(consumed_roll) is not None:
+        raise InvalidRuleOperationError("attack roll has already been consumed")
+    hit = _passed(roll)
+    if hit and payload.rolled_damage == 0:
+        raise InvalidRuleOperationError("a hit must apply at least one point of damage")
     target, before = _claim_investigator(
         session, campaign_id, payload.target_id, payload.target_expected_version
     )
@@ -385,9 +500,7 @@ def _chase_response(record: ChaseRecord) -> ChaseResponse:
         case_session_id=UUID(record.case_session_id) if record.case_session_id else None,
         session_key=record.session_key,
         status=record.status,
-        participants=tuple(
-            ChaseParticipant.model_validate(item) for item in record.participants
-        ),
+        participants=tuple(ChaseParticipant.model_validate(item) for item in record.participants),
         version=record.version,
         citation=EngineCitationResponse.model_validate(CHASE_CITATION.as_dict()),
         created_at=record.created_at,
@@ -395,13 +508,12 @@ def _chase_response(record: ChaseRecord) -> ChaseResponse:
     )
 
 
-def create_chase(
-    session: Session, campaign_id: UUID, payload: ChaseCreateRequest
-) -> ChaseResponse:
+def create_chase(session: Session, campaign_id: UUID, payload: ChaseCreateRequest) -> ChaseResponse:
     _validate_case_session(session, campaign_id, payload.case_session_id)
-    if session.scalar(
-        select(CampaignRecord.id).where(CampaignRecord.id == str(campaign_id))
-    ) is None:
+    if (
+        session.scalar(select(CampaignRecord.id).where(CampaignRecord.id == str(campaign_id)))
+        is None
+    ):
         raise service.EntityNotFoundError("campaign not found")
     requested_ids = {str(item.investigator_id) for item in payload.participants}
     found_ids = set(
@@ -417,9 +529,7 @@ def create_chase(
     record = ChaseRecord(
         campaign_id=str(campaign_id),
         title=payload.title,
-        case_session_id=(
-            str(payload.case_session_id) if payload.case_session_id else None
-        ),
+        case_session_id=(str(payload.case_session_id) if payload.case_session_id else None),
         session_key=payload.session_key,
         status="active",
         participants=[item.model_dump(mode="json") for item in payload.participants],
@@ -451,9 +561,10 @@ def create_chase(
 
 
 def list_chases(session: Session, campaign_id: UUID) -> list[ChaseResponse]:
-    if session.scalar(
-        select(CampaignRecord.id).where(CampaignRecord.id == str(campaign_id))
-    ) is None:
+    if (
+        session.scalar(select(CampaignRecord.id).where(CampaignRecord.id == str(campaign_id)))
+        is None
+    ):
         raise service.EntityNotFoundError("campaign not found")
     records = session.scalars(
         select(ChaseRecord)
@@ -484,9 +595,7 @@ def advance_chase(
     if not set(move_by_id) <= participant_ids:
         raise InvalidRuleOperationError("move references a non-participant")
     for item in participants:
-        item["position"] = int(item["position"]) + move_by_id.get(
-            str(item["investigator_id"]), 0
-        )
+        item["position"] = int(item["position"]) + move_by_id.get(str(item["investigator_id"]), 0)
     result = cast(
         CursorResult[Any],
         session.execute(
@@ -505,9 +614,7 @@ def advance_chase(
     if result.rowcount != 1:
         session.rollback()
         raise service.VersionConflictError("chase version conflict")
-    record = session.scalar(
-        select(ChaseRecord).where(ChaseRecord.id == str(chase_id))
-    )
+    record = session.scalar(select(ChaseRecord).where(ChaseRecord.id == str(chase_id)))
     assert record is not None
     response = _chase_response(record)
     _add_operation(
@@ -515,9 +622,7 @@ def advance_chase(
         campaign_id=campaign_id,
         operation_type="chase_advanced",
         subject_id=record.id,
-        case_session_id=(
-            UUID(record.case_session_id) if record.case_session_id else None
-        ),
+        case_session_id=(UUID(record.case_session_id) if record.case_session_id else None),
         session_key=record.session_key,
         input_data=payload.model_dump(mode="json"),
         output_data={"version": record.version, "participants": participants},
@@ -537,12 +642,11 @@ def advance_chase(
     return response
 
 
-def list_operations(
-    session: Session, campaign_id: UUID
-) -> list[RuleOperationLogResponse]:
-    if session.scalar(
-        select(CampaignRecord.id).where(CampaignRecord.id == str(campaign_id))
-    ) is None:
+def list_operations(session: Session, campaign_id: UUID) -> list[RuleOperationLogResponse]:
+    if (
+        session.scalar(select(CampaignRecord.id).where(CampaignRecord.id == str(campaign_id)))
+        is None
+    ):
         raise service.EntityNotFoundError("campaign not found")
     records = session.scalars(
         select(RuleOperationRecord)
@@ -555,9 +659,7 @@ def list_operations(
             operation_id=UUID(record.id),
             campaign_id=UUID(record.campaign_id),
             subject_id=UUID(record.subject_id),
-            case_session_id=(
-                UUID(record.case_session_id) if record.case_session_id else None
-            ),
+            case_session_id=(UUID(record.case_session_id) if record.case_session_id else None),
             session_key=record.session_key,
             operation_type=record.operation_type,
             input_data=record.input_data,

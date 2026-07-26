@@ -34,6 +34,7 @@ from coc_kp_assistant.domain.rolls import (
 )
 from coc_kp_assistant.infrastructure.models import (
     CampaignRecord,
+    CaseSessionRecord,
     InvestigatorBackstoryRecord,
     InvestigatorRecord,
     InvestigatorSkillRecord,
@@ -565,12 +566,21 @@ def record_roll(session: Session, payload: RecordedRollRequest) -> RecordedRollR
         raise EntityNotFoundError("campaign not found")
     if (
         payload.investigator_id is not None
-        and session.scalar(
-            _investigator_query(payload.campaign_id, payload.investigator_id)
-        )
+        and session.scalar(_investigator_query(payload.campaign_id, payload.investigator_id))
         is None
     ):
         raise EntityNotFoundError("investigator not found")
+    if (
+        payload.case_session_id is not None
+        and session.scalar(
+            select(CaseSessionRecord.id).where(
+                CaseSessionRecord.id == str(payload.case_session_id),
+                CaseSessionRecord.campaign_id == str(payload.campaign_id),
+            )
+        )
+        is None
+    ):
+        raise EntityNotFoundError("case session not found")
 
     dice = payload.dice or PercentileDice(
         units_digit=randbelow(10),
@@ -590,6 +600,7 @@ def record_roll(session: Session, payload: RecordedRollRequest) -> RecordedRollR
     resolution = resolve_percentile_roll(request)
     record = RollRecord(
         campaign_id=str(payload.campaign_id),
+        case_session_id=(str(payload.case_session_id) if payload.case_session_id else None),
         investigator_id=str(payload.investigator_id) if payload.investigator_id else None,
         skill_key=payload.skill_key,
         label=payload.label,
@@ -602,6 +613,7 @@ def record_roll(session: Session, payload: RecordedRollRequest) -> RecordedRollR
     response = RecordedRollResponse(
         roll_id=UUID(record.id),
         campaign_id=payload.campaign_id,
+        case_session_id=payload.case_session_id,
         investigator_id=payload.investigator_id,
         skill_key=payload.skill_key,
         label=payload.label,

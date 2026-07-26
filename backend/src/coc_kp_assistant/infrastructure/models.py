@@ -205,6 +205,9 @@ class RollRecord(Base):
     campaign_id: Mapped[str] = mapped_column(
         ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    case_session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("case_sessions.id", ondelete="SET NULL"), index=True
+    )
     investigator_id: Mapped[str | None] = mapped_column(
         ForeignKey("investigators.id", ondelete="SET NULL"), index=True
     )
