@@ -69,6 +69,18 @@ export function CombatChasePage(): ReactElement {
   const activeChase = chases.find((item) => item.chase_id === chaseId) ?? chases[0];
 
   useEffect(() => {
+    if (!activeChase) {
+      setActingParticipantId("");
+      return;
+    }
+    setActingParticipantId((current) =>
+      activeChase.participants.some((item) => item.investigator_id === current)
+        ? current
+        : activeChase.participants[0]?.investigator_id || "",
+    );
+  }, [activeChase]);
+
+  useEffect(() => {
     const controller = new AbortController();
     Promise.all([listCampaigns(controller.signal), listWeapons(controller.signal)])
       .then(([campaignItems, weaponItems]) => {

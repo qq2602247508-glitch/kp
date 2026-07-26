@@ -185,7 +185,7 @@ def sanity_conditions(
     result = set(existing)
     if single_loss >= 5 and intelligence_check_passed:
         result.add("temporary_insanity")
-    if session_loss >= max(1, starting_sanity // 5):
+    if session_loss >= max(1, (starting_sanity + 4) // 5):
         result.add("indefinite_insanity")
     return result
 

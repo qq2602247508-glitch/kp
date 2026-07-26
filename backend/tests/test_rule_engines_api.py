@@ -1,3 +1,5 @@
+# ruff: noqa: E501
+
 from sqlalchemy import inspect
 
 from coc_kp_assistant.application.rule_engine_service import _citation_items
@@ -167,7 +169,7 @@ def test_sanity_loss_is_deterministic_versioned_cited_and_logged(client) -> None
     )
     assert stale.status_code == 409
 
-    second = client.post(
+    reused = client.post(
         f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/sanity-loss",
         json={
             "expected_version": first_result["investigator"]["version"],
@@ -175,6 +177,30 @@ def test_sanity_loss_is_deterministic_versioned_cited_and_logged(client) -> None
             "reason": "听见不可名状的低语",
             "case_session_id": case_session_id,
             "intelligence_roll_id": intelligence_roll.json()["roll_id"],
+        },
+    )
+    assert reused.status_code == 422
+    second_roll = client.post(
+        "/api/v1/rolls",
+        json={
+            "campaign_id": campaign_id,
+            "case_session_id": case_session_id,
+            "investigator_id": investigator_id,
+            "skill_key": "intelligence",
+            "label": "INT",
+            "target": 70,
+            "dice": {"units_digit": 2, "tens_digits": [2]},
+        },
+    )
+    assert second_roll.status_code == 201
+    second = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/sanity-loss",
+        json={
+            "expected_version": first_result["investigator"]["version"],
+            "loss": 7,
+            "reason": "听见不可名状的低语",
+            "case_session_id": case_session_id,
+            "intelligence_roll_id": second_roll.json()["roll_id"],
         },
     )
     assert second.status_code == 200, second.text
@@ -465,6 +491,18 @@ def test_stabilization_medicine_and_insanity_transition_bind_recorded_rolls(clie
         and "temporary_insanity" not in temporary.json()["investigator"]["conditions"]
     )
     # A second loss in the same session creates indefinite insanity; treatment binds a roll.
+    second_int_roll = client.post(
+        "/api/v1/rolls",
+        json={
+            "campaign_id": campaign_id,
+            "case_session_id": session_id,
+            "investigator_id": investigator_id,
+            "skill_key": "intelligence",
+            "label": "INT",
+            "target": 70,
+            "dice": {"units_digit": 2, "tens_digits": [1]},
+        },
+    ).json()
     second = client.post(
         f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/sanity-loss",
         json={
@@ -472,7 +510,7 @@ def test_stabilization_medicine_and_insanity_transition_bind_recorded_rolls(clie
             "loss": 7,
             "reason": "更多恐怖",
             "case_session_id": session_id,
-            "intelligence_roll_id": int_roll["roll_id"],
+            "intelligence_roll_id": second_int_roll["roll_id"],
         },
     ).json()
     clear_second_temporary = client.post(
@@ -672,10 +710,10 @@ def test_chase_hazard_roll_is_bound_and_escape_completes(client) -> None:
         json={
             "title": "巷战",
             "case_session_id": case_session_id,
-            "escape_distance": 1,
+            "escape_distance": 2,
             "participants": [
                 {"investigator_id": first["investigator_id"], "role": "pursuer", "position": 0},
-                {"investigator_id": second["investigator_id"], "role": "fleeing", "position": 0},
+                {"investigator_id": second["investigator_id"], "role": "fleeing", "position": 1},
             ],
         },
     )
@@ -731,3 +769,118 @@ def test_chase_hazard_roll_is_bound_and_escape_completes(client) -> None:
     logs = client.get(f"/api/v1/campaigns/{campaign_id}/rule-operations").json()
     hazard_log = next(item for item in logs if item["operation_type"] == "chase_advanced")
     assert hazard_log["citations"] == escaped.json()["citations"]
+
+
+def test_sanity_indefinite_threshold_rounds_up_from_starting_sanity(client) -> None:
+    payload = investigator_payload("阈值测试")
+    payload["characteristics"]["power"] = 59  # type: ignore[index]
+    campaign = client.post("/api/v1/campaigns", json=campaign_payload()).json()
+    campaign_id = campaign["campaign_id"]
+    investigator = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators", json=payload
+    ).json()
+    case_session_id = create_case_session(client, campaign_id)
+
+    def intelligence_roll(units: int) -> str:
+        response = client.post(
+            "/api/v1/rolls",
+            json={
+                "campaign_id": campaign_id,
+                "case_session_id": case_session_id,
+                "investigator_id": investigator["investigator_id"],
+                "skill_key": "intelligence",
+                "label": "INT",
+                "target": 70,
+                "dice": {"units_digit": units, "tens_digits": [2]},
+            },
+        )
+        assert response.status_code == 201
+        return response.json()["roll_id"]
+
+    first = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{investigator['investigator_id']}/sanity-loss",
+        json={"expected_version": 1, "loss": 5, "reason": "A", "case_session_id": case_session_id,
+              "intelligence_roll_id": intelligence_roll(1)},
+    )
+    assert first.status_code == 200
+    second = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{investigator['investigator_id']}/sanity-loss",
+        json={"expected_version": first.json()["investigator"]["version"], "loss": 6, "reason": "B",
+              "case_session_id": case_session_id, "intelligence_roll_id": intelligence_roll(2)},
+    )
+    assert second.status_code == 200
+    assert "indefinite_insanity" not in second.json()["investigator"]["conditions"]
+    third = client.post(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{investigator['investigator_id']}/sanity-loss",
+        json={"expected_version": second.json()["investigator"]["version"], "loss": 1, "reason": "C",
+              "case_session_id": case_session_id},
+    )
+    assert third.status_code == 200
+    assert "indefinite_insanity" in third.json()["investigator"]["conditions"]
+
+
+def test_recovery_requires_valid_single_use_medicine_and_constitution_rolls(client) -> None:
+    campaign_id, investigator, _ = setup_pair(client)
+    investigator_id = investigator["investigator_id"]
+    case_session_id = create_case_session(client, campaign_id)
+    injury_url = f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/injury"
+    first_injury = client.post(injury_url, json={"expected_version": 1, "damage": 1, "reason": "A", "case_session_id": case_session_id}).json()
+    recovery_url = f"/api/v1/campaigns/{campaign_id}/investigators/{investigator_id}/recovery"
+    assert client.post(recovery_url, json={"expected_version": first_injury["investigator"]["version"], "care_type": "medicine", "injury_id": first_injury["injury_id"], "case_session_id": case_session_id}).status_code == 422
+    medicine = client.post("/api/v1/rolls", json={"campaign_id": campaign_id, "case_session_id": case_session_id, "investigator_id": investigator_id, "skill_key": "medicine", "label": "医学", "target": 60, "dice": {"units_digit": 1, "tens_digits": [1]}}).json()
+    recovered = client.post(recovery_url, json={"expected_version": first_injury["investigator"]["version"], "care_type": "medicine", "injury_id": first_injury["injury_id"], "medicine_roll_id": medicine["roll_id"], "healing_roll": 1, "case_session_id": case_session_id})
+    assert recovered.status_code == 200
+    second_injury = client.post(injury_url, json={"expected_version": recovered.json()["investigator"]["version"], "damage": 1, "reason": "B", "case_session_id": case_session_id}).json()
+    assert client.post(recovery_url, json={"expected_version": second_injury["investigator"]["version"], "care_type": "medicine", "injury_id": second_injury["injury_id"], "medicine_roll_id": medicine["roll_id"], "healing_roll": 1, "case_session_id": case_session_id}).status_code == 422
+    wrong_constitution = client.post("/api/v1/rolls", json={"campaign_id": campaign_id, "case_session_id": case_session_id, "investigator_id": investigator_id, "skill_key": "medicine", "label": "错误 CON", "target": 60, "dice": {"units_digit": 1, "tens_digits": [1]}}).json()
+    assert client.post(recovery_url, json={"expected_version": second_injury["investigator"]["version"], "care_type": "natural", "injury_id": second_injury["injury_id"], "constitution_roll_id": wrong_constitution["roll_id"], "healing_roll": 1, "period_key": "day-1", "case_session_id": case_session_id}).status_code == 422
+    constitution = client.post("/api/v1/rolls", json={"campaign_id": campaign_id, "case_session_id": case_session_id, "investigator_id": investigator_id, "skill_key": "constitution", "label": "CON", "target": 60, "dice": {"units_digit": 1, "tens_digits": [1]}}).json()
+    natural = client.post(recovery_url, json={"expected_version": second_injury["investigator"]["version"], "care_type": "natural", "injury_id": second_injury["injury_id"], "constitution_roll_id": constitution["roll_id"], "healing_roll": 1, "period_key": "day-1", "case_session_id": case_session_id})
+    assert natural.status_code == 200
+    third_injury = client.post(injury_url, json={"expected_version": natural.json()["investigator"]["version"], "damage": 1, "reason": "C", "case_session_id": case_session_id}).json()
+    assert client.post(recovery_url, json={"expected_version": third_injury["investigator"]["version"], "care_type": "natural", "injury_id": third_injury["injury_id"], "constitution_roll_id": constitution["roll_id"], "healing_roll": 1, "period_key": "day-2", "case_session_id": case_session_id}).status_code == 422
+
+
+def test_combat_derives_damage_bonus_from_stored_characteristics(client) -> None:
+    campaign_id, attacker, target = setup_pair(client)
+    case_session_id = create_case_session(client, campaign_id)
+    attacker_id = attacker["investigator_id"]
+    updated = client.put(
+        f"/api/v1/campaigns/{campaign_id}/investigators/{attacker_id}",
+        json={
+            **{
+                key: value
+                for key, value in attacker.items()
+                if key not in {"investigator_id", "campaign_id", "version"}
+            },
+            "damage_bonus": "+100d100",
+            "expected_version": attacker["version"],
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    roll = client.post("/api/v1/rolls", json={"campaign_id": campaign_id, "case_session_id": case_session_id, "investigator_id": attacker_id, "skill_key": "fighting_brawl", "label": "斗殴", "target": 55, "dice": {"units_digit": 1, "tens_digits": [1]}}).json()
+    response = client.post(f"/api/v1/campaigns/{campaign_id}/combat/resolve", json={"attacker_id": attacker_id, "target_id": target["investigator_id"], "target_expected_version": target["version"], "attack_roll_id": roll["roll_id"], "weapon_key": "unarmed", "rolled_damage": 100, "case_session_id": case_session_id})
+    assert response.status_code == 422
+
+
+def test_chase_validates_initial_terminal_state_positions_and_hazard_roll_reuse(client) -> None:
+    campaign_id, first, second = setup_pair(client)
+    case_session_id = create_case_session(client, campaign_id)
+    create_url = f"/api/v1/campaigns/{campaign_id}/chases"
+    base = {"title": "边界", "case_session_id": case_session_id, "escape_distance": 5, "track_length": 5,
+            "participants": [{"investigator_id": first["investigator_id"], "role": "pursuer", "position": 0}, {"investigator_id": second["investigator_id"], "role": "fleeing", "position": 3}]}
+    invalid = client.post(create_url, json={**base, "participants": [{**base["participants"][0], "position": 6}, base["participants"][1]]})
+    assert invalid.status_code == 422
+    caught = client.post(create_url, json={**base, "participants": [{**base["participants"][0], "position": 3}, base["participants"][1]]})
+    assert caught.status_code == 201 and caught.json()["status"] == "caught"
+    created = client.post(create_url, json=base)
+    assert created.status_code == 201
+    chase = created.json()
+    advance_url = f"{create_url}/{chase['chase_id']}/advance"
+    roll = client.post("/api/v1/rolls", json={"campaign_id": campaign_id, "case_session_id": case_session_id, "investigator_id": first["investigator_id"], "skill_key": "fighting_brawl", "label": "障碍", "target": 55, "dice": {"units_digit": 1, "tens_digits": [1]}}).json()
+    first_action = client.post(advance_url, json={"expected_version": 1, "action": {"investigator_id": first["investigator_id"], "action": "hazard", "roll_id": roll["roll_id"], "skill_key": "fighting_brawl"}})
+    assert first_action.status_code == 200
+    reset = client.post(advance_url, json={"expected_version": 2, "action": {"investigator_id": second["investigator_id"], "action": "move"}})
+    assert reset.status_code == 200
+    reused = client.post(advance_url, json={"expected_version": 3, "action": {"investigator_id": first["investigator_id"], "action": "hazard", "roll_id": roll["roll_id"], "skill_key": "fighting_brawl"}})
+    assert reused.status_code == 422

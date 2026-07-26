@@ -1,4 +1,3 @@
-import re
 from typing import Any, cast
 from uuid import UUID
 
@@ -195,15 +194,32 @@ def _current_skill(record: InvestigatorRecord, skill_key: str) -> int:
     raise InvalidRuleOperationError("investigator does not have the required skill")
 
 
-def _damage_bonus_max(value: str) -> int:
-    if value == "0":
+def _stored_damage_bonus_max(record: InvestigatorRecord) -> int:
+    """Return the maximum COC7 damage bonus from stored STR+SIZ, never profile text."""
+    total = record.strength + record.size
+    if total <= 64:
+        return -2
+    if total <= 84:
+        return -1
+    if total <= 124:
         return 0
-    if re.fullmatch(r"-\d+", value):
-        return int(value)
-    match = re.fullmatch(r"\+?(\d+)[dD](\d+)", value)
-    if match:
-        return int(match.group(1)) * int(match.group(2))
-    raise InvalidRuleOperationError("unsupported damage bonus notation")
+    if total <= 164:
+        return 4
+    if total <= 204:
+        return 6
+    # COC7 continues at one additional D6 for each 80 points above 205.
+    dice = 2 + (total - 205) // 80
+    return dice * 6
+
+
+def _roll_already_consumed(
+    session: Session, *, operation_type: str, roll_id: UUID, json_path: Any
+) -> bool:
+    consumed = select(RuleOperationRecord.id).where(
+        RuleOperationRecord.operation_type == operation_type,
+        json_path.as_string() == str(roll_id),
+    )
+    return session.scalar(consumed) is not None
 
 
 def _claim_investigator(
@@ -242,6 +258,13 @@ def apply_sanity_loss(
             skill_key="intelligence",
             target=record.intelligence,
         )
+        if _roll_already_consumed(
+            session,
+            operation_type="sanity_loss",
+            roll_id=payload.intelligence_roll_id,
+            json_path=RuleOperationRecord.input_data["intelligence_roll_id"],
+        ):
+            raise InvalidRuleOperationError("intelligence roll has already been consumed")
         intelligence_passed = _passed(intelligence_roll)
     prior = session.scalars(
         select(RuleOperationRecord)
@@ -445,6 +468,13 @@ def apply_recovery(
         )
         if not _passed(roll):
             raise InvalidRuleOperationError("medicine roll must pass")
+        if _roll_already_consumed(
+            session,
+            operation_type="recovery",
+            roll_id=payload.medicine_roll_id,
+            json_path=RuleOperationRecord.input_data["medicine_roll_id"],
+        ):
+            raise InvalidRuleOperationError("medicine roll has already been consumed")
         if "dying" in record.conditions:
             raise InvalidRuleOperationError("medicine cannot silently clear dying; stabilize first")
         healing = recovery_amount("medicine", payload.healing_roll)
@@ -459,10 +489,18 @@ def apply_recovery(
             campaign_id=campaign_id,
             investigator_id=investigator_id,
             case_session_id=payload.case_session_id,
+            skill_key="constitution",
             target=record.constitution,
         )
         if not _passed(roll):
             raise InvalidRuleOperationError("constitution roll must pass")
+        if _roll_already_consumed(
+            session,
+            operation_type="recovery",
+            roll_id=payload.constitution_roll_id,
+            json_path=RuleOperationRecord.input_data["constitution_roll_id"],
+        ):
+            raise InvalidRuleOperationError("constitution roll has already been consumed")
         duplicate_period = select(RuleOperationRecord.id).where(
             RuleOperationRecord.campaign_id == str(campaign_id),
             RuleOperationRecord.subject_id == str(investigator_id),
@@ -689,7 +727,7 @@ def resolve_combat(
         raise InvalidRuleOperationError("a dead investigator cannot participate in combat")
     maximum_damage = weapon.maximum_rolled_damage
     if weapon.uses_damage_bonus:
-        maximum_damage += _damage_bonus_max(attacker.damage_bonus)
+        maximum_damage += _stored_damage_bonus_max(attacker)
     if payload.rolled_damage > maximum_damage:
         raise InvalidRuleOperationError("rolled damage exceeds the weapon policy")
     roll = _roll_for(
@@ -817,12 +855,19 @@ def create_chase(session: Session, campaign_id: UUID, payload: ChaseCreateReques
         }
         for item in payload.participants
     ]
+    pursuers = [int(item["position"]) for item in participants if item["role"] == "pursuer"]
+    fleeing = [int(item["position"]) for item in participants if item["role"] == "fleeing"]
+    status = "active"
+    if pursuers and fleeing and max(pursuers) >= min(fleeing):
+        status = "caught"
+    elif fleeing and max(fleeing) >= min(payload.escape_distance, payload.track_length):
+        status = "escaped"
     record = ChaseRecord(
         campaign_id=str(campaign_id),
         title=payload.title,
         case_session_id=str(payload.case_session_id),
         session_key=payload.session_key,
-        status="active",
+        status=status,
         participants=participants,
         round=1,
         escape_distance=payload.escape_distance,
@@ -913,6 +958,13 @@ def advance_chase(
             target=current_target,
         )
         succeeded = _passed(roll)
+        if _roll_already_consumed(
+            session,
+            operation_type="chase_advanced",
+            roll_id=cast(UUID, action.roll_id),
+            json_path=RuleOperationRecord.input_data["action"]["roll_id"],
+        ):
+            raise InvalidRuleOperationError("hazard roll has already been consumed")
     if succeeded:
         participant["position"] = min(int(participant["position"]) + 1, record.track_length)
     participant["actions_remaining"] = int(participant["actions_remaining"]) - 1

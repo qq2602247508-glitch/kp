@@ -13,13 +13,13 @@ const citations = [citation];
 const chase = { chase_id: "chase-1", campaign_id: "campaign-1", title: "现场追逐", case_session_id: "session-1", session_key: null, status: "active", round: 1, escape_distance: 10, track_length: 10, version: 1, citation, citations, created_at: "2026-01-01", updated_at: "2026-01-01", participants: [{ investigator_id: "inv-1", role: "pursuer", position: 0, move_rate: 8, actions_remaining: 1 }, { investigator_id: "inv-2", role: "fleeing", position: 2, move_rate: 8, actions_remaining: 1 }] };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
-function mockFetch(hasSession = true): ReturnType<typeof vi.fn> {
+function mockFetch(hasSession = true, operations: unknown[] = []): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/campaigns") && !init?.method) return Promise.resolve(json([campaign]));
     if (url.endsWith("/case-state/sessions")) return Promise.resolve(json(hasSession ? [session] : []));
     if (url.endsWith("/investigators")) return Promise.resolve(json(people));
-    if (url.endsWith("/rule-operations")) return Promise.resolve(json([]));
+    if (url.endsWith("/rule-operations")) return Promise.resolve(json(operations));
     if (url.endsWith("/rule-engines/weapons")) return Promise.resolve(json([{ weapon_key: "unarmed", name: "徒手", damage_notation: "1D3", maximum_rolled_damage: 3, skill_key: "fighting_brawl", uses_damage_bonus: true, citation, citations }]));
     if (url.endsWith("/chases")) return Promise.resolve(json(init?.method === "POST" ? chase : []));
     if (url.endsWith("/rolls")) return Promise.resolve(json({ roll_id: "roll-1", roll: 20, tens: [2], ones: 0, target: 70, regular_threshold: 70, hard_threshold: 35, extreme_threshold: 14, outcome: "regular", difficulty: "regular", bonus_penalty: 0, passed: true }, 201));
@@ -66,6 +66,17 @@ describe("engine session compatibility", () => {
     fireEvent.click(screen.getByRole("button", { name: "记录理智损失" }));
     expect(await screen.findByText("请先选择案件场次；规则操作必须归属到场次。"))
       .toBeInTheDocument();
+  });
+
+  it("offers every recent injury operation for recovery", async () => {
+    mockFetch(true, [
+      { operation_id: "op-old", campaign_id: "campaign-1", subject_id: "inv-1", case_session_id: "session-1", session_key: null, operation_type: "injury", input_data: {}, output_data: { injury_id: "injury-old" }, citation, citations, created_at: "2026-01-01" },
+      { operation_id: "op-new", campaign_id: "campaign-1", subject_id: "inv-1", case_session_id: "session-1", session_key: null, operation_type: "injury", input_data: {}, output_data: { injury_id: "injury-new" }, citation, citations, created_at: "2026-01-02" },
+    ]);
+    render(<SanityInjuryPage />);
+    await waitFor(() => expect(screen.getByLabelText("要恢复的伤势")).toHaveValue("injury-new"));
+    expect(screen.getByLabelText("要恢复的伤势")).toContainHTML('value="injury-old"');
+    expect(screen.getByLabelText("要恢复的伤势")).toContainHTML('value="injury-new"');
   });
 
   it("sends selected chase positions and lets the user choose its participant action", async () => {

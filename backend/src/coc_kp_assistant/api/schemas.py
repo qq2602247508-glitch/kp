@@ -213,6 +213,12 @@ class RecoveryRequest(DomainModel):
     session_key: str | None = Field(default=None, max_length=120)
     case_session_id: UUID
 
+    @model_validator(mode="after")
+    def recovery_requires_healing_roll(self) -> "RecoveryRequest":
+        if self.care_type in {"medicine", "natural"} and self.healing_roll is None:
+            raise ValueError("medicine and natural recovery require a 1-3 healing roll")
+        return self
+
 
 class DyingCheckRequest(DomainModel):
     expected_version: int = Field(ge=1)
@@ -313,6 +319,8 @@ class ChaseCreateRequest(DomainModel):
             raise ValueError("chase participants must be unique")
         if self.escape_distance > self.track_length:
             raise ValueError("escape distance must not exceed track length")
+        if any(item.position > self.track_length for item in self.participants):
+            raise ValueError("initial participant position must not exceed track length")
         return self
 
 

@@ -61,13 +61,17 @@ export function SanityInjuryPage(): ReactElement {
     [investigatorId, investigators],
   );
 
-  const latestInjuryId = useMemo(() => {
-    const injury = [...logs].reverse().find(
-      (entry) => entry.operation_type === "injury" && entry.subject_id === investigatorId,
-    );
-    const value = injury?.output_data.injury_id;
-    return typeof value === "string" ? value : "";
+  const injuryOptions = useMemo(() => {
+    return [...logs]
+      .reverse()
+      .filter((entry) => entry.operation_type === "injury" && entry.subject_id === investigatorId)
+      .flatMap((entry) => {
+        const value = entry.output_data.injury_id;
+        return typeof value === "string" ? [{ id: value, label: `伤势 ${value.slice(0, 8)}` }] : [];
+      });
   }, [investigatorId, logs]);
+
+  const latestInjuryId = injuryOptions[0]?.id ?? "";
 
   useEffect(() => {
     const controller = new AbortController();
@@ -342,7 +346,7 @@ export function SanityInjuryPage(): ReactElement {
               <span>要恢复的伤势</span>
               <select value={injuryId || latestInjuryId} onChange={(event) => setInjuryId(event.target.value)}>
                 <option value="">请选择伤势</option>
-                {latestInjuryId ? <option value={latestInjuryId}>最近伤势</option> : null}
+                {injuryOptions.map((injury) => <option key={injury.id} value={injury.id}>{injury.label}</option>)}
               </select>
             </label>
             <label className="field">
