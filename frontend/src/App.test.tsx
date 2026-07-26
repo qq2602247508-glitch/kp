@@ -11,7 +11,13 @@ describe("COC KP application shell", () => {
       vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith("/campaigns")) {
-          return { ok: true, json: async () => [{ campaign_id: "campaign-1", title: "雾港失踪案", era: "1920s" }] };
+          return {
+            ok: true,
+            json: async () => [
+              { campaign_id: "campaign-1", title: "雾港失踪案", era: "1920s" },
+              { campaign_id: "campaign-2", title: "白河旧宅", era: "gaslight" },
+            ],
+          };
         }
         if (url.endsWith("/delivery/readiness")) {
           return {
@@ -54,6 +60,27 @@ describe("COC KP application shell", () => {
     expect(picker).toHaveValue("campaign-1");
     expect(window.localStorage.getItem("local-coc-kp-assistant:selected-campaign")).toBe("campaign-1");
     expect(screen.getByText("雾港失踪案：守秘档案已展开。")).toBeInTheDocument();
+  });
+
+  it("preserves a stored campaign while navigating between workspaces", async () => {
+    window.localStorage.setItem(
+      "local-coc-kp-assistant:selected-campaign",
+      "campaign-2",
+    );
+    render(<App />);
+
+    const globalPicker = await screen.findByRole("combobox", {
+      name: "全局当前案件",
+    });
+    expect(globalPicker).toHaveValue("campaign-2");
+
+    fireEvent.click(screen.getByRole("button", { name: /调查员/ }));
+    expect(await screen.findByLabelText("当前调查")).toHaveValue("campaign-2");
+    expect(globalPicker).toHaveValue("campaign-2");
+
+    fireEvent.click(screen.getByRole("button", { name: /审计日志/ }));
+    expect(await screen.findByRole("heading", { name: "状态与规则审计" })).toBeInTheDocument();
+    expect(globalPicker).toHaveValue("campaign-2");
   });
 
   it("starts on the keeper dashboard", () => {
@@ -131,6 +158,17 @@ describe("COC KP application shell", () => {
       await screen.findByRole("heading", { name: "待确认提案中心" }),
     ).toBeInTheDocument();
     expect(screen.getByText(/确认前不会写入案件资料/)).toBeInTheDocument();
+  });
+
+  it("opens the state and rule audit workspace", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /审计日志/ }));
+
+    expect(
+      await screen.findByRole("heading", { name: "状态与规则审计" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "审计类型" })).toBeInTheDocument();
   });
 
   it("opens the real settings and delivery workspace", () => {

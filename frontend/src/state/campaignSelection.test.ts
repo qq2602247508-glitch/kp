@@ -8,7 +8,10 @@ import {
 } from "./campaignSelection";
 
 describe("campaign selection", () => {
-  beforeEach(() => window.localStorage.clear());
+  beforeEach(() => {
+    window.localStorage.clear();
+    selectCampaign("");
+  });
 
   it("prefers a valid current id, then stored id, then first available", () => {
     window.localStorage.setItem("local-coc-kp-assistant:selected-campaign", "stored");
@@ -29,10 +32,12 @@ describe("campaign selection", () => {
 
   it("continues with in-memory events when storage throws", () => {
     vi.spyOn(window.localStorage, "setItem").mockImplementation(() => { throw new Error("blocked"); });
+    vi.spyOn(window.localStorage, "getItem").mockImplementation(() => { throw new Error("blocked"); });
     const listener = vi.fn();
     const unsubscribe = subscribeToCampaignSelection(listener);
     selectCampaign("campaign-3");
-    expect(readSelectedCampaignId()).toBe("");
+    expect(readSelectedCampaignId()).toBe("campaign-3");
+    expect(chooseAvailableCampaign(["campaign-1", "campaign-3"], "")).toBe("campaign-3");
     expect(listener).toHaveBeenCalledWith("campaign-3");
     unsubscribe();
   });

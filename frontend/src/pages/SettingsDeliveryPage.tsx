@@ -16,6 +16,11 @@ import type {
   CampaignSourcePacks,
   DeliveryReadiness,
 } from "../api/types";
+import {
+  chooseAvailableCampaign,
+  selectCampaign,
+  subscribeToCampaignSelection,
+} from "../state/campaignSelection";
 
 const STATUS_LABELS: Record<string, string> = {
   ready: "就绪",
@@ -44,7 +49,12 @@ export function SettingsDeliveryPage(): ReactElement {
       .then(([nextReadiness, nextCampaigns]) => {
         setReadiness(nextReadiness);
         setCampaigns(nextCampaigns);
-        setCampaignId(nextCampaigns[0]?.campaign_id ?? "");
+        const selected = chooseAvailableCampaign(
+          nextCampaigns.map((item) => item.campaign_id),
+          "",
+        );
+        setCampaignId(selected);
+        selectCampaign(selected);
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
@@ -53,6 +63,16 @@ export function SettingsDeliveryPage(): ReactElement {
       });
     return () => controller.abort();
   }, []);
+
+  useEffect(
+    () =>
+      subscribeToCampaignSelection((nextCampaignId) => {
+        setCampaignId((current) =>
+          current === nextCampaignId ? current : nextCampaignId,
+        );
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (!campaignId) {
@@ -151,6 +171,8 @@ export function SettingsDeliveryPage(): ReactElement {
       const result = await importCampaign(parsed);
       setMessage(`已原子导入战役 ${result.campaign_id}；不会覆盖已有战役。`);
       setCampaigns(await listCampaigns());
+      setCampaignId(result.campaign_id);
+      selectCampaign(result.campaign_id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "导入包无效。");
     } finally {
@@ -222,7 +244,13 @@ export function SettingsDeliveryPage(): ReactElement {
         <h3>战役资料包</h3>
         <label>
           当前战役
-          <select value={campaignId} onChange={(event) => setCampaignId(event.target.value)}>
+          <select
+            value={campaignId}
+            onChange={(event) => {
+              setCampaignId(event.target.value);
+              selectCampaign(event.target.value);
+            }}
+          >
             <option value="">请选择战役</option>
             {campaigns.map((campaign) => (
               <option key={campaign.campaign_id} value={campaign.campaign_id}>

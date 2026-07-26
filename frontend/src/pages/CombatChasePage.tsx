@@ -21,6 +21,11 @@ import type {
   RuleOperationLog,
   WeaponPolicy,
 } from "../api/types";
+import {
+  chooseAvailableCampaign,
+  selectCampaign,
+  subscribeToCampaignSelection,
+} from "../state/campaignSelection";
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -85,7 +90,12 @@ export function CombatChasePage(): ReactElement {
     Promise.all([listCampaigns(controller.signal), listWeapons(controller.signal)])
       .then(([campaignItems, weaponItems]) => {
         setCampaigns(campaignItems);
-        setCampaignId((current) => current || campaignItems[0]?.campaign_id || "");
+        const selected = chooseAvailableCampaign(
+          campaignItems.map((item) => item.campaign_id),
+          "",
+        );
+        setCampaignId(selected);
+        selectCampaign(selected);
         setWeapons(weaponItems);
       })
       .catch((error: unknown) => {
@@ -95,6 +105,16 @@ export function CombatChasePage(): ReactElement {
       });
     return () => controller.abort();
   }, []);
+
+  useEffect(
+    () =>
+      subscribeToCampaignSelection((nextCampaignId) => {
+        setCampaignId((current) =>
+          current === nextCampaignId ? current : nextCampaignId,
+        );
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (!campaignId) {
@@ -189,6 +209,7 @@ export function CombatChasePage(): ReactElement {
 
   function changeCampaign(nextCampaignId: string): void {
     setCampaignId(nextCampaignId);
+    selectCampaign(nextCampaignId);
     setAttackerId("");
     setTargetId("");
     setCaseSessionId("");

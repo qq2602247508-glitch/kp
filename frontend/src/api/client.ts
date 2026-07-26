@@ -22,6 +22,7 @@ import type {
   RuleSearchResponse,
   AIKPResponse,
   AIProposal,
+  ProposalAuditLog,
   BackupResult,
   CampaignExport,
   CampaignSourcePacks,
@@ -408,6 +409,16 @@ export function listAIProposals(
 ): Promise<AIProposal[]> {
   return request<AIProposal[]>(
     `/campaigns/${campaignId}/ai-kp/proposals`,
+    { signal },
+  );
+}
+
+export function listAIProposalAudits(
+  campaignId: string,
+  signal?: AbortSignal,
+): Promise<ProposalAuditLog[]> {
+  return request<ProposalAuditLog[]>(
+    `/campaigns/${campaignId}/ai-kp/proposal-audits`,
     { signal },
   );
 }

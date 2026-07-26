@@ -352,6 +352,18 @@ export type AIProposal = {
   resolved_at: string | null;
 };
 
+export type ProposalAuditLog = {
+  audit_id: string;
+  proposal_id: string;
+  campaign_id: string;
+  action: "confirm" | "reject";
+  expected_version: number;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  reason: string | null;
+  created_at: string;
+};
+
 export type AIKPResponse = {
   answer: string;
   keeper_private_hints: string[];

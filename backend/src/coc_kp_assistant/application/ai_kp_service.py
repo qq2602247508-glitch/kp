@@ -17,6 +17,7 @@ from coc_kp_assistant.domain.ai_kp import (
     AIKPRequest,
     AIKPResponse,
     AIProposalResponse,
+    ProposalAuditResponse,
     ProposalDecision,
 )
 from coc_kp_assistant.domain.case_state import (
@@ -344,6 +345,32 @@ def list_proposals(
         query = query.where(AIProposalRecord.status == status)
     records = session.scalars(query.order_by(AIProposalRecord.created_at.desc())).all()
     return [_proposal_response(record) for record in records]
+
+
+def list_proposal_audits(
+    session: Session,
+    campaign_id: UUID,
+) -> list[ProposalAuditResponse]:
+    service.get_campaign(session, campaign_id)
+    records = session.scalars(
+        select(ProposalAuditRecord)
+        .where(ProposalAuditRecord.campaign_id == str(campaign_id))
+        .order_by(ProposalAuditRecord.created_at.desc())
+    ).all()
+    return [
+        ProposalAuditResponse(
+            audit_id=UUID(record.id),
+            proposal_id=UUID(record.proposal_id),
+            campaign_id=UUID(record.campaign_id),
+            action=cast(Any, record.action),
+            expected_version=record.expected_version,
+            before=record.before_data,
+            after=record.after_data,
+            reason=record.reason,
+            created_at=record.created_at,
+        )
+        for record in records
+    ]
 
 
 def decide_proposal(

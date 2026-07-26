@@ -11,6 +11,11 @@ import type {
   AIProposal,
   Campaign,
 } from "../api/types";
+import {
+  chooseAvailableCampaign,
+  selectCampaign,
+  subscribeToCampaignSelection,
+} from "../state/campaignSelection";
 
 export function AIKPPage({
   initialView,
@@ -34,11 +39,26 @@ export function AIKPPage({
     listCampaigns(controller.signal)
       .then((items) => {
         setCampaigns(items);
-        setCampaignId((current) => current || items[0]?.campaign_id || "");
+        const selected = chooseAvailableCampaign(
+          items.map((item) => item.campaign_id),
+          "",
+        );
+        setCampaignId(selected);
+        selectCampaign(selected);
       })
       .catch(() => undefined);
     return () => controller.abort();
   }, []);
+
+  useEffect(
+    () =>
+      subscribeToCampaignSelection((nextCampaignId) => {
+        setCampaignId((current) =>
+          current === nextCampaignId ? current : nextCampaignId,
+        );
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (!campaignId) {
@@ -115,7 +135,13 @@ export function AIKPPage({
 
       <label className="ai-kp-case-picker">
         当前案件
-        <select value={campaignId} onChange={(event) => setCampaignId(event.target.value)}>
+        <select
+          value={campaignId}
+          onChange={(event) => {
+            setCampaignId(event.target.value);
+            selectCampaign(event.target.value);
+          }}
+        >
           <option value="">请选择案件</option>
           {campaigns.map((campaign) => (
             <option key={campaign.campaign_id} value={campaign.campaign_id}>
@@ -168,6 +194,23 @@ export function AIKPPage({
               <ul>
                 {result.scene_suggestions.map((item) => <li key={item}>{item}</li>)}
               </ul>
+              <h3>规则与证据引用</h3>
+              {result.citations.length ? (
+                <div className="ai-kp-citations">
+                  {result.citations.map((citation, index) => (
+                    <article key={`${String(citation.citation_id ?? "citation")}-${index}`}>
+                      <strong>
+                        {String(citation.filename ?? "本地规则资料")}
+                        {citation.page ? ` · 第 ${String(citation.page)} 页` : ""}
+                      </strong>
+                      <span>{String(citation.section ?? "未标章节")}</span>
+                      {citation.excerpt ? <p>{String(citation.excerpt)}</p> : null}
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="proposal-evidence">本次建议只使用案件上下文，未引用规则片段。</p>
+              )}
               <small>
                 {result.model_name} · {result.proposals.length} 项待确认提案
               </small>

@@ -330,6 +330,12 @@ def test_confirm_is_atomic_versioned_and_reject_is_audited(db_session: Any) -> N
     )
     assert rejected.status == "rejected"
     assert rejected.rejection_reason == "不符合当前节奏"
+    audits = ai_kp_service.list_proposal_audits(db_session, campaign_id)
+    assert [audit.action for audit in audits] == ["reject", "confirm"]
+    assert audits[0].proposal_id == rejected_proposal.proposal_id
+    assert audits[0].reason == "不符合当前节奏"
+    assert audits[0].before["status"] == "pending"
+    assert audits[0].after["status"] == "rejected"
 
 
 def test_create_proposal_fails_closed_after_case_state_changes(

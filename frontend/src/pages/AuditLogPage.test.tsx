@@ -4,12 +4,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuditLogPage } from "./AuditLogPage";
 
 vi.mock("../api/client", () => ({
+  listAIProposalAudits: vi.fn(),
   listCampaigns: vi.fn(),
   listRuleOperations: vi.fn(),
   listStateAudits: vi.fn(),
 }));
 
-import { listCampaigns, listRuleOperations, listStateAudits } from "../api/client";
+import {
+  listAIProposalAudits,
+  listCampaigns,
+  listRuleOperations,
+  listStateAudits,
+} from "../api/client";
 
 afterEach(() => vi.clearAllMocks());
 
@@ -36,6 +42,12 @@ describe("AuditLogPage", () => {
         section: "技能", edition: "7e", module: "core", era: ["1920s"], checksum: "a".repeat(64) }],
       created_at: "2026-01-01T00:00:00Z",
     }]);
+    vi.mocked(listAIProposalAudits).mockResolvedValue([{
+      audit_id: "proposal-audit-1", proposal_id: "proposal-1", campaign_id: "campaign-1",
+      action: "reject", expected_version: 1, before: { status: "pending" },
+      after: { status: "rejected" }, reason: "会破坏当前节奏",
+      created_at: "2026-01-02T00:00:00Z",
+    }]);
 
     render(<AuditLogPage />);
     expect(await screen.findByText("更新线索")).toBeInTheDocument();
@@ -49,6 +61,12 @@ describe("AuditLogPage", () => {
     fireEvent.click(screen.getByText("查看变更前后"));
     expect(screen.getByText(/"status": "open"/)).toBeInTheDocument();
     expect(screen.getByText(/"status": "resolved"/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /AI 提案裁决/ }));
+    expect(screen.getByText("拒绝提案")).toBeInTheDocument();
+    expect(screen.getByText("原因：会破坏当前节奏")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("查看裁决前后"));
+    expect(screen.getByText(/"status": "pending"/)).toBeInTheDocument();
+    expect(screen.getByText(/"status": "rejected"/)).toBeInTheDocument();
   });
 
   it("shows API errors from campaign and audit loading", async () => {
@@ -61,6 +79,7 @@ describe("AuditLogPage", () => {
     vi.mocked(listCampaigns).mockResolvedValue([campaign]);
     vi.mocked(listStateAudits).mockRejectedValue(new Error("audit unavailable"));
     vi.mocked(listRuleOperations).mockResolvedValue([]);
+    vi.mocked(listAIProposalAudits).mockResolvedValue([]);
     render(<AuditLogPage />);
     expect(await screen.findByRole("alert")).toHaveTextContent("audit unavailable");
   });

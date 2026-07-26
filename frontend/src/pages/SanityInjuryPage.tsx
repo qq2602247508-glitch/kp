@@ -20,6 +20,11 @@ import type {
   Investigator,
   RuleOperationLog,
 } from "../api/types";
+import {
+  chooseAvailableCampaign,
+  selectCampaign,
+  subscribeToCampaignSelection,
+} from "../state/campaignSelection";
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -78,7 +83,12 @@ export function SanityInjuryPage(): ReactElement {
     listCampaigns(controller.signal)
       .then((items) => {
         setCampaigns(items);
-        setCampaignId((current) => current || items[0]?.campaign_id || "");
+        const selected = chooseAvailableCampaign(
+          items.map((item) => item.campaign_id),
+          "",
+        );
+        setCampaignId(selected);
+        selectCampaign(selected);
       })
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -87,6 +97,16 @@ export function SanityInjuryPage(): ReactElement {
       });
     return () => controller.abort();
   }, []);
+
+  useEffect(
+    () =>
+      subscribeToCampaignSelection((nextCampaignId) => {
+        setCampaignId((current) =>
+          current === nextCampaignId ? current : nextCampaignId,
+        );
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (!campaignId) {
@@ -243,6 +263,7 @@ export function SanityInjuryPage(): ReactElement {
 
   function changeCampaign(nextCampaignId: string): void {
     setCampaignId(nextCampaignId);
+    selectCampaign(nextCampaignId);
     setInvestigatorId("");
     setCaseSessionId("");
     setInjuryId("");

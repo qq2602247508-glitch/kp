@@ -5,7 +5,7 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
 scan_targets=()
-for target in backend/src backend/migrations frontend/src; do
+for target in backend/src backend/alembic frontend/src; do
   if [ -e "$target" ]; then
     scan_targets+=("$target")
   fi
@@ -40,4 +40,3 @@ if rg -n \
 fi
 
 echo "Domain isolation check passed."
-

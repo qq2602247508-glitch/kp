@@ -71,6 +71,18 @@ class AIProposalResponse(DomainModel):
     resolved_at: datetime | None
 
 
+class ProposalAuditResponse(DomainModel):
+    audit_id: UUID
+    proposal_id: UUID
+    campaign_id: UUID
+    action: Literal["confirm", "reject"]
+    expected_version: int
+    before: dict[str, Any]
+    after: dict[str, Any]
+    reason: str | None
+    created_at: datetime
+
+
 class AIKPResponse(DomainModel):
     answer: str
     keeper_private_hints: tuple[str, ...]

@@ -22,6 +22,11 @@ import type {
   CaseEntryDraft,
   PlayerCaseEntry,
 } from "../api/types";
+import {
+  chooseAvailableCampaign,
+  selectCampaign,
+  subscribeToCampaignSelection,
+} from "../state/campaignSelection";
 
 const KINDS: Array<{ kind: CaseEntityKind; label: string; createLabel: string }> = [
   { kind: "sessions", label: "团次", createLabel: "新建团次" },
@@ -151,7 +156,12 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
     listCampaigns(controller.signal)
       .then((result) => {
         setCampaigns(result);
-        setCampaignId((current) => current || result[0]?.campaign_id || "");
+        const selected = chooseAvailableCampaign(
+          result.map((campaign) => campaign.campaign_id),
+          "",
+        );
+        setCampaignId(selected);
+        selectCampaign(selected);
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
@@ -160,6 +170,18 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
       });
     return () => controller.abort();
   }, []);
+
+  useEffect(
+    () =>
+      subscribeToCampaignSelection((nextCampaignId) => {
+        setCampaignId((current) =>
+          current === nextCampaignId ? current : nextCampaignId,
+        );
+        setEditing(null);
+        setPlayerPreview(null);
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (!campaignId) {
@@ -227,6 +249,7 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
       });
       setCampaigns((current) => [...current, created]);
       setCampaignId(created.campaign_id);
+      selectCampaign(created.campaign_id);
       setMessage("案件已建立。");
     } catch (error: unknown) {
       setMessage(errorMessage(error, "案件建立失败，请检查本地服务。"));
@@ -332,6 +355,7 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
               value={campaignId}
               onChange={(event) => {
                 setCampaignId(event.target.value);
+                selectCampaign(event.target.value);
                 beginNew();
               }}
             >

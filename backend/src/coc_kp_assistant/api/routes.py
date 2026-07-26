@@ -47,6 +47,7 @@ from coc_kp_assistant.domain.ai_kp import (
     AIKPRequest,
     AIKPResponse,
     AIProposalResponse,
+    ProposalAuditResponse,
     ProposalDecision,
 )
 from coc_kp_assistant.domain.campaigns import CampaignCreate
@@ -782,6 +783,20 @@ def list_ai_kp_proposals(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
         ) from error
+
+
+@router.get(
+    "/campaigns/{campaign_id}/ai-kp/proposal-audits",
+    response_model=list[ProposalAuditResponse],
+)
+def list_ai_kp_proposal_audits(
+    campaign_id: UUID,
+    session: DatabaseSession,
+) -> list[ProposalAuditResponse]:
+    try:
+        return ai_kp_service.list_proposal_audits(session, campaign_id)
+    except service.EntityNotFoundError as error:
+        raise _not_found_or_conflict(error) from error
 
 
 @router.post(

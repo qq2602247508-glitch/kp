@@ -68,6 +68,18 @@ backend/.venv/bin/python -m coc_kp_assistant.ingestion \
 `data/generated-content/coc7`（该目录不入 Git）。PDF 必须已有文字层；DOCX、XLSX
 和 XLSM 仅以 OOXML/ZIP 方式读取，绝不执行宏、公式或外部链接。
 
+首次使用规则检索或 AI KP 前，还必须确认 Ollama 已经运行，且本机已有
+`bge-m3:latest` 与 `qwen3:30b-instruct`。项目不会替你下载模型。来源路径与
+checksum 验证无误后，可以运行：
+
+```bash
+./scripts/prepare-rules.sh
+```
+
+该脚本会重新验证登记来源、生成被 Git 忽略的确定性语料，并增量构建独立的
+`coc7_rules` 索引；已有且未变化的资料包不会重复嵌入。若模型、来源文件或
+Ollama 缺失，脚本会明确失败，不会偷偷安装或下载。
+
 ## 检查
 
 ```bash

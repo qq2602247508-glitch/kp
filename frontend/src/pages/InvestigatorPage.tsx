@@ -20,6 +20,11 @@ import type {
   RollResult,
   SkillEntry,
 } from "../api/types";
+import {
+  chooseAvailableCampaign,
+  selectCampaign,
+  subscribeToCampaignSelection,
+} from "../state/campaignSelection";
 
 const CHARACTERISTICS: {
   key: keyof Characteristics;
@@ -223,12 +228,12 @@ export function InvestigatorPage(): ReactElement {
     try {
       const result = await listCampaigns(signal);
       setCampaigns(result);
-      setCampaignId((current) => {
-        if (current && result.some((campaign) => campaign.campaign_id === current)) {
-          return current;
-        }
-        return result[0]?.campaign_id ?? "";
-      });
+      const selected = chooseAvailableCampaign(
+        result.map((campaign) => campaign.campaign_id),
+        "",
+      );
+      setCampaignId(selected);
+      selectCampaign(selected);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
@@ -244,6 +249,16 @@ export function InvestigatorPage(): ReactElement {
     void loadCampaigns(controller.signal);
     return () => controller.abort();
   }, [loadCampaigns]);
+
+  useEffect(
+    () =>
+      subscribeToCampaignSelection((nextCampaignId) => {
+        setCampaignId((current) =>
+          current === nextCampaignId ? current : nextCampaignId,
+        );
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (!campaignId) {
@@ -290,6 +305,7 @@ export function InvestigatorPage(): ReactElement {
       });
       setCampaigns((items) => [...items, created]);
       setCampaignId(created.campaign_id);
+      selectCampaign(created.campaign_id);
       setNotice("调查已创建。");
     } catch (error) {
       setFailure(errorMessage(error));
@@ -385,7 +401,10 @@ export function InvestigatorPage(): ReactElement {
             当前调查
             <select
               aria-label="当前调查"
-              onChange={(event) => setCampaignId(event.target.value)}
+              onChange={(event) => {
+                setCampaignId(event.target.value);
+                selectCampaign(event.target.value);
+              }}
               value={campaignId}
             >
               <option value="">未选择</option>

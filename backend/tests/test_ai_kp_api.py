@@ -165,3 +165,11 @@ def test_ai_proposal_api_requires_explicit_confirmation_before_case_write(
     assert confirmed.json()["status"] == "confirmed"
     after = client.get(f"/api/v1/campaigns/{campaign_id}/case-state/scenes")
     assert [item["title"] for item in after.json()] == ["封闭仓库"]
+    audits = client.get(
+        f"/api/v1/campaigns/{campaign_id}/ai-kp/proposal-audits"
+    )
+    assert audits.status_code == 200, audits.text
+    assert audits.json()[0]["proposal_id"] == proposal["proposal_id"]
+    assert audits.json()[0]["action"] == "confirm"
+    assert audits.json()[0]["before"]["status"] == "pending"
+    assert audits.json()[0]["after"]["status"] == "confirmed"
