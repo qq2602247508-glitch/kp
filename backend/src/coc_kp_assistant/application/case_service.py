@@ -10,6 +10,9 @@ from coc_kp_assistant.domain.case_state import (
     CaseEntryCreate,
     CaseEntryReplace,
     CaseEntryResponse,
+    PersonAttack,
+    PersonEntityType,
+    PersonSkill,
     PlayerCaseEntryResponse,
 )
 from coc_kp_assistant.infrastructure.models import (
@@ -45,7 +48,21 @@ MODEL_BY_KIND: dict[CaseEntityKind, type[Any]] = {
 COMMON_FIELDS = {"title", "player_visible_text", "keeper_truth", "status"}
 FIELDS_BY_KIND: dict[CaseEntityKind, set[str]] = {
     CaseEntityKind.SESSIONS: COMMON_FIELDS | {"time_label"},
-    CaseEntityKind.PEOPLE: COMMON_FIELDS | {"role"},
+    CaseEntityKind.PEOPLE: COMMON_FIELDS
+    | {
+        "role",
+        "person_type",
+        "characteristics",
+        "hit_points",
+        "move_rate",
+        "damage_bonus",
+        "build",
+        "armor",
+        "sanity_loss",
+        "skills",
+        "attacks",
+        "special_abilities",
+    },
     CaseEntityKind.LOCATIONS: COMMON_FIELDS,
     CaseEntityKind.SCENES: COMMON_FIELDS | {"session_id", "location_id"},
     CaseEntityKind.CLUES: COMMON_FIELDS
@@ -146,7 +163,17 @@ def _record_values(
     values: dict[str, object] = {}
     for field_name in FIELDS_BY_KIND[kind]:
         value = getattr(payload, field_name)
-        values[field_name] = str(value) if isinstance(value, UUID) else value
+        if isinstance(value, UUID):
+            values[field_name] = str(value)
+        elif hasattr(value, "model_dump"):
+            values[field_name] = value.model_dump(mode="json")
+        elif isinstance(value, tuple):
+            values[field_name] = [
+                item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+                for item in value
+            ]
+        else:
+            values[field_name] = value
     return values
 
 
@@ -161,6 +188,22 @@ def _response(kind: CaseEntityKind, record: Any) -> CaseEntryResponse:
         status=record.status,
         time_label=getattr(record, "time_label", None),
         role=getattr(record, "role", None),
+        person_type=PersonEntityType(getattr(record, "person_type", "keeper_npc")),
+        characteristics=getattr(record, "characteristics", None),
+        hit_points=getattr(record, "hit_points", None),
+        move_rate=getattr(record, "move_rate", None),
+        damage_bonus=getattr(record, "damage_bonus", None),
+        build=getattr(record, "build", None),
+        armor=getattr(record, "armor", None),
+        sanity_loss=getattr(record, "sanity_loss", None),
+        skills=tuple(
+            PersonSkill.model_validate(item) for item in getattr(record, "skills", [])
+        ),
+        attacks=tuple(
+            PersonAttack.model_validate(item)
+            for item in getattr(record, "attacks", [])
+        ),
+        special_abilities=tuple(getattr(record, "special_abilities", [])),
         session_id=getattr(record, "session_id", None),
         location_id=getattr(record, "location_id", None),
         scene_id=getattr(record, "scene_id", None),

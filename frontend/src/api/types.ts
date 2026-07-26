@@ -191,6 +191,31 @@ export type CaseEntityKind =
   | "handouts"
   | "timeline-events";
 
+export type PersonEntityType =
+  | "keeper_npc"
+  | "mythos_entity"
+  | "animal"
+  | "custom";
+
+export type PersonCharacteristics = Characteristics;
+
+export type PersonSkill = {
+  name: string;
+  value: number;
+  description: string;
+};
+
+export type PersonAttack = {
+  name: string;
+  skill_name: string;
+  skill_value: number;
+  damage: string;
+  attacks_per_round: number;
+  range: string | null;
+  malfunction: number | null;
+  description: string;
+};
+
 export type CaseEntryDraft = {
   title: string;
   player_visible_text: string;
@@ -198,6 +223,17 @@ export type CaseEntryDraft = {
   status: string;
   time_label?: string | null;
   role?: string | null;
+  person_type?: PersonEntityType;
+  characteristics?: PersonCharacteristics | null;
+  hit_points?: number | null;
+  move_rate?: number | null;
+  damage_bonus?: string | null;
+  build?: number | null;
+  armor?: string | null;
+  sanity_loss?: string | null;
+  skills?: PersonSkill[];
+  attacks?: PersonAttack[];
+  special_abilities?: string[];
   session_id?: string | null;
   location_id?: string | null;
   scene_id?: string | null;
@@ -212,10 +248,36 @@ export type CaseEntryDraft = {
 };
 
 export type CaseEntry = Required<
-  Omit<CaseEntryDraft, "time_label" | "role">
+  Omit<
+    CaseEntryDraft,
+    | "time_label"
+    | "role"
+    | "person_type"
+    | "characteristics"
+    | "hit_points"
+    | "move_rate"
+    | "damage_bonus"
+    | "build"
+    | "armor"
+    | "sanity_loss"
+    | "skills"
+    | "attacks"
+    | "special_abilities"
+  >
 > & {
   time_label: string | null;
   role: string | null;
+  person_type: PersonEntityType;
+  characteristics: PersonCharacteristics | null;
+  hit_points: number | null;
+  move_rate: number | null;
+  damage_bonus: string | null;
+  build: number | null;
+  armor: string | null;
+  sanity_loss: string | null;
+  skills: PersonSkill[];
+  attacks: PersonAttack[];
+  special_abilities: string[];
   entity_id: string;
   campaign_id: string;
   kind: CaseEntityKind;

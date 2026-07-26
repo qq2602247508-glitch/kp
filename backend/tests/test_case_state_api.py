@@ -217,3 +217,72 @@ def test_case_state_delete_requires_current_version(client) -> None:
     deleted = client.delete(path, params={"expected_version": 1})
     assert deleted.status_code == 204
     assert client.get(path).status_code == 404
+
+
+def test_coc7_npc_and_mythos_entity_sheet_round_trip(client) -> None:
+    campaign = create_campaign(client, "黑水镇异闻")
+    campaign_id = str(campaign["campaign_id"])
+    entity = create_entry(
+        client,
+        campaign_id,
+        "people",
+        title="深潜者斥候",
+        role="神话生物",
+        person_type="mythos_entity",
+        characteristics={
+            "strength": 80,
+            "constitution": 65,
+            "size": 65,
+            "dexterity": 50,
+            "intelligence": 45,
+            "power": 50,
+            "appearance": 5,
+            "education": 20,
+        },
+        hit_points=13,
+        move_rate=8,
+        damage_bonus="+1D4",
+        build=1,
+        armor="鳞片 1 点",
+        sanity_loss="0/1D6",
+        skills=[
+            {"name": "侦查", "value": 60, "description": "发现伏击目标"},
+            {"name": "潜行", "value": 50, "description": "水下接近"},
+        ],
+        attacks=[
+            {
+                "name": "爪击",
+                "skill_name": "斗殴",
+                "skill_value": 55,
+                "damage": "1D6+DB",
+                "attacks_per_round": 1,
+                "description": "近战攻击，可闪避或反击",
+            }
+        ],
+        special_abilities=["两栖", "黑暗视觉"],
+    )
+
+    assert entity["person_type"] == "mythos_entity"
+    assert entity["characteristics"]["strength"] == 80
+    assert entity["skills"][0]["name"] == "侦查"
+    assert entity["attacks"][0]["damage"] == "1D6+DB"
+    assert entity["special_abilities"] == ["两栖", "黑暗视觉"]
+
+    listed = client.get(f"/api/v1/campaigns/{campaign_id}/case-state/people")
+    assert listed.status_code == 200
+    assert listed.json()[0]["sanity_loss"] == "0/1D6"
+
+
+def test_person_sheet_rejects_duplicate_skill_names(client) -> None:
+    campaign = create_campaign(client)
+    response = client.post(
+        f"/api/v1/campaigns/{campaign['campaign_id']}/case-state/people",
+        json={
+            "title": "非法人物",
+            "skills": [
+                {"name": "侦查", "value": 60},
+                {"name": "侦查", "value": 70},
+            ],
+        },
+    )
+    assert response.status_code == 422

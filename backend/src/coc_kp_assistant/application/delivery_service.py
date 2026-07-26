@@ -639,7 +639,23 @@ def _validate_import_semantics(
 
     case_contracts: dict[str, tuple[CaseEntityKind, tuple[str, ...]]] = {
         "case_sessions": (CaseEntityKind.SESSIONS, ("time_label",)),
-        "case_people": (CaseEntityKind.PEOPLE, ("role",)),
+        "case_people": (
+            CaseEntityKind.PEOPLE,
+            (
+                "role",
+                "person_type",
+                "characteristics",
+                "hit_points",
+                "move_rate",
+                "damage_bonus",
+                "build",
+                "armor",
+                "sanity_loss",
+                "skills",
+                "attacks",
+                "special_abilities",
+            ),
+        ),
         "case_locations": (CaseEntityKind.LOCATIONS, ()),
         "case_scenes": (
             CaseEntityKind.SCENES,

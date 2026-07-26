@@ -11,6 +11,7 @@ import type { Campaign, DeliveryReadiness } from "./api/types";
 import { InvestigatorPage } from "./pages/InvestigatorPage";
 import { CombatChasePage } from "./pages/CombatChasePage";
 import { CaseWorkspacePage } from "./pages/CaseWorkspacePage";
+import { PeopleCodexPage } from "./pages/PeopleCodexPage";
 import { RulesPage } from "./pages/RulesPage";
 import { SanityInjuryPage } from "./pages/SanityInjuryPage";
 import { AIKPPage } from "./pages/AIKPPage";
@@ -274,7 +275,7 @@ export function App(): ReactElement {
         {workspace === "sanity" ? <SanityInjuryPage /> : null}
         {workspace === "encounters" ? <CombatChasePage /> : null}
         {workspace === "table" ? <CaseWorkspacePage initialKind="sessions" /> : null}
-        {workspace === "people" ? <CaseWorkspacePage initialKind="people" /> : null}
+        {workspace === "people" ? <PeopleCodexPage /> : null}
         {workspace === "locations" ? <CaseWorkspacePage initialKind="locations" /> : null}
         {workspace === "clues" ? <CaseWorkspacePage initialKind="clues" /> : null}
         {workspace === "assistant" ? <AIKPPage initialView="assistant" /> : null}

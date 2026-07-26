@@ -129,7 +129,7 @@ class InvestigatorSkillRecord(Base):
             name="uq_investigator_skill_identity",
         ),
         CheckConstraint("base_value >= 0 AND base_value <= 100", name="ck_skill_base"),
-        CheckConstraint("current_value >= 0 AND current_value <= 100", name="ck_skill_current"),
+        CheckConstraint("current_value >= 0 AND current_value <= 999", name="ck_skill_current"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
@@ -412,6 +412,19 @@ class CasePersonRecord(Base):
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     role: Mapped[str | None] = mapped_column(String(120))
+    person_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="keeper_npc"
+    )
+    characteristics: Mapped[dict[str, int] | None] = mapped_column(JSON)
+    hit_points: Mapped[int | None] = mapped_column(Integer)
+    move_rate: Mapped[int | None] = mapped_column(Integer)
+    damage_bonus: Mapped[str | None] = mapped_column(String(40))
+    build: Mapped[int | None] = mapped_column(Integer)
+    armor: Mapped[str | None] = mapped_column(String(200))
+    sanity_loss: Mapped[str | None] = mapped_column(String(120))
+    skills: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+    attacks: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+    special_abilities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     player_visible_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     keeper_truth: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")

@@ -1,0 +1,27 @@
+.people-codex { display: grid; gap: 18px; }
+.people-codex-header { align-items: end; display: flex; justify-content: space-between; gap: 24px; }
+.people-codex-header h2 { margin: 4px 0; }
+.people-codex-header > label { min-width: 240px; }
+.people-codex-layout { display: grid; grid-template-columns: minmax(260px, .72fr) minmax(620px, 1.8fr); gap: 18px; }
+.people-codex-list, .people-codex-editor { background: var(--surface, #171512); border: 1px solid rgba(207, 160, 86, .22); border-radius: 14px; padding: 16px; }
+.people-codex-title { align-items: center; display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.people-codex-list { align-self: start; display: grid; gap: 9px; }
+.people-codex-card { background: rgba(255,255,255,.025); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; color: inherit; display: grid; gap: 9px; padding: 12px; text-align: left; }
+.people-codex-card.selected { border-color: #cf9f55; box-shadow: 0 0 0 1px rgba(207,159,85,.35); }
+.people-codex-card > span { display: flex; justify-content: space-between; gap: 8px; }
+.people-codex-card small { opacity: .66; }
+.people-codex-card b { color: #d9b878; font-size: .78rem; }
+.people-codex-card p { margin: 0; opacity: .8; }
+.people-codex-editor { display: grid; gap: 15px; }
+.people-codex-editor fieldset { border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 12px; }
+.people-form-grid, .people-stat-grid, .people-text-grid { display: grid; gap: 12px; }
+.people-form-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.people-form-grid.compact { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.people-stat-grid { grid-template-columns: repeat(8, minmax(70px, 1fr)); }
+.people-text-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.people-text-grid label:last-child { grid-column: 1 / -1; }
+.people-codex-editor label { display: grid; gap: 6px; }
+.people-codex-editor input, .people-codex-editor select, .people-codex-editor textarea { width: 100%; }
+.people-codex-actions { align-items: center; display: flex; gap: 14px; }
+@media (max-width: 1050px) { .people-codex-layout { grid-template-columns: 1fr; } .people-stat-grid, .people-form-grid.compact { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 650px) { .people-codex-header { align-items: stretch; flex-direction: column; } .people-form-grid, .people-stat-grid, .people-form-grid.compact, .people-text-grid { grid-template-columns: 1fr 1fr; } }
