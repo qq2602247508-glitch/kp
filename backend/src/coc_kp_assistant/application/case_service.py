@@ -183,6 +183,8 @@ def create_entry(
     campaign_id: UUID,
     kind: CaseEntityKind,
     payload: CaseEntryCreate,
+    *,
+    commit: bool = True,
 ) -> CaseEntryResponse:
     _ensure_campaign(session, campaign_id)
     _validate_payload_shape(kind, payload)
@@ -201,7 +203,8 @@ def create_entry(
         entity_id=record.id,
         after=response.model_dump(mode="json"),
     )
-    session.commit()
+    if commit:
+        session.commit()
     return response
 
 
@@ -239,6 +242,8 @@ def replace_entry(
     kind: CaseEntityKind,
     entity_id: UUID,
     payload: CaseEntryReplace,
+    *,
+    commit: bool = True,
 ) -> CaseEntryResponse:
     before = get_entry(session, campaign_id, kind, entity_id)
     _validate_payload_shape(kind, payload)
@@ -274,7 +279,8 @@ def replace_entry(
         before=before.model_dump(mode="json"),
         after=response.model_dump(mode="json"),
     )
-    session.commit()
+    if commit:
+        session.commit()
     return response
 
 

@@ -18,6 +18,8 @@ import type {
   RuleAnswerResponse,
   RuleFilters,
   RuleSearchResponse,
+  AIKPResponse,
+  AIProposal,
 } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api/v1").replace(/\/$/, "");
@@ -342,6 +344,44 @@ export function advanceChase(
 ): Promise<Chase> {
   return request<Chase>(
     `/campaigns/${campaignId}/chases/${chaseId}/advance`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export function askAIKP(
+  campaignId: string,
+  payload: {
+    question: string;
+    mode: "answer" | "private_hint" | "scenario_draft";
+  },
+): Promise<AIKPResponse> {
+  return request<AIKPResponse>(`/campaigns/${campaignId}/ai-kp/ask`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listAIProposals(
+  campaignId: string,
+  signal?: AbortSignal,
+): Promise<AIProposal[]> {
+  return request<AIProposal[]>(
+    `/campaigns/${campaignId}/ai-kp/proposals`,
+    { signal },
+  );
+}
+
+export function decideAIProposal(
+  campaignId: string,
+  proposalId: string,
+  payload: {
+    expected_version: number;
+    decision: "confirm" | "reject";
+    reason?: string;
+  },
+): Promise<AIProposal> {
+  return request<AIProposal>(
+    `/campaigns/${campaignId}/ai-kp/proposals/${proposalId}/decision`,
     { method: "POST", body: JSON.stringify(payload) },
   );
 }

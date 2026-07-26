@@ -37,6 +37,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_factory = session_factory
     app.state.settings = active_settings
     app.state.rules_service = None
+    app.state.ai_kp_orchestrator = None
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(active_settings.allowed_origins),

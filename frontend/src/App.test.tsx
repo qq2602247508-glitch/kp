@@ -63,4 +63,21 @@ describe("COC KP application shell", () => {
     expect(screen.getByRole("button", { name: "结算攻击" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "建立追逐" })).toBeInTheDocument();
   });
+
+  it("opens real AI KP and proposal workspaces with advisory-only controls", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /AI KP 助手/ }));
+    expect(
+      await screen.findByRole("heading", { name: "AI KP 私密工作台" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("模型建议尚未生效")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成建议" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /提案中心/ }));
+    expect(
+      await screen.findByRole("heading", { name: "待确认提案中心" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/确认前不会写入案件资料/)).toBeInTheDocument();
+  });
 });

@@ -302,3 +302,34 @@ export type Chase = {
   created_at: string;
   updated_at: string;
 };
+
+export type AIProposal = {
+  proposal_id: string;
+  campaign_id: string;
+  proposal_type: "case_state_create" | "case_state_replace";
+  case_kind: CaseEntityKind;
+  target_entity_id: string | null;
+  campaign_version: number;
+  target_version: number | null;
+  payload: Record<string, unknown>;
+  evidence: Record<string, unknown>[];
+  citation_ids: string[];
+  model_name: string;
+  model_metadata: Record<string, unknown>;
+  status: "pending" | "confirmed" | "rejected";
+  version: number;
+  rejection_reason: string | null;
+  applied_entity_id: string | null;
+  created_at: string;
+  resolved_at: string | null;
+};
+
+export type AIKPResponse = {
+  answer: string;
+  keeper_private_hints: string[];
+  scene_suggestions: string[];
+  citations: Record<string, unknown>[];
+  proposals: AIProposal[];
+  model_name: string;
+  advisory_only: true;
+};

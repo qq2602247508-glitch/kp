@@ -33,7 +33,13 @@ from coc_kp_assistant.api.schemas import (
     SkillsReplace,
     WeaponPolicyResponse,
 )
-from coc_kp_assistant.application import case_service, rule_engine_service, service
+from coc_kp_assistant.application import ai_kp_service, case_service, rule_engine_service, service
+from coc_kp_assistant.domain.ai_kp import (
+    AIKPRequest,
+    AIKPResponse,
+    AIProposalResponse,
+    ProposalDecision,
+)
 from coc_kp_assistant.domain.campaigns import CampaignCreate
 from coc_kp_assistant.domain.case_state import (
     CaseEntityKind,
@@ -72,6 +78,45 @@ def get_rules_service(request: Request) -> RulesService:
 
 
 RulesServiceDependency = Annotated[RulesService, Depends(get_rules_service)]
+
+
+def get_ai_kp_orchestrator(
+    request: Request,
+) -> ai_kp_service.AIKPOrchestrator:
+    existing = getattr(request.app.state, "ai_kp_orchestrator", None)
+    if existing is None:
+        rules_service = get_rules_service(request)
+
+        def read_rules(question: str) -> list[dict[str, object]]:
+            citations = rules_service.search(RuleQuery(query=question, limit=8))
+            return [
+                {
+                    "citation_id": item.citation_id,
+                    "excerpt": item.excerpt,
+                    "score": item.score,
+                    "source_pack": item.source_pack,
+                    "edition": item.edition,
+                    "module": item.module,
+                    "era": list(item.era),
+                    "filename": item.filename,
+                    "page": item.page,
+                    "section": item.section,
+                    "checksum": item.checksum,
+                }
+                for item in citations
+            ]
+
+        existing = ai_kp_service.AIKPOrchestrator(
+            provider=ai_kp_service.OllamaAIKPProvider(),
+            rules_reader=read_rules,
+        )
+        request.app.state.ai_kp_orchestrator = existing
+    return cast(ai_kp_service.AIKPOrchestrator, existing)
+
+
+AIKPDependency = Annotated[
+    ai_kp_service.AIKPOrchestrator, Depends(get_ai_kp_orchestrator)
+]
 
 
 def _not_found_or_conflict(error: Exception) -> HTTPException:
@@ -622,3 +667,81 @@ def answer_rules(
         abstained=answer.abstained,
         reason=answer.reason,
     )
+
+
+@router.post(
+    "/campaigns/{campaign_id}/ai-kp/ask",
+    response_model=AIKPResponse,
+)
+def ask_ai_kp(
+    campaign_id: UUID,
+    payload: AIKPRequest,
+    session: DatabaseSession,
+    orchestrator: AIKPDependency,
+) -> AIKPResponse:
+    try:
+        return orchestrator.ask(session, campaign_id, payload)
+    except service.EntityNotFoundError as error:
+        raise _not_found_or_conflict(error) from error
+    except ai_kp_service.AIKPUnavailableError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="本地 qwen3:30b-instruct 或 COC7 规则索引不可用",
+        ) from error
+    except (
+        ai_kp_service.InvalidAIOutputError,
+        ai_kp_service.PrivateTruthLeakError,
+    ) as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(error),
+        ) from error
+
+
+@router.get(
+    "/campaigns/{campaign_id}/ai-kp/proposals",
+    response_model=list[AIProposalResponse],
+)
+def list_ai_kp_proposals(
+    campaign_id: UUID,
+    session: DatabaseSession,
+    proposal_status: Annotated[str | None, Query(alias="status")] = None,
+) -> list[AIProposalResponse]:
+    try:
+        return ai_kp_service.list_proposals(
+            session, campaign_id, status=proposal_status
+        )
+    except service.EntityNotFoundError as error:
+        raise _not_found_or_conflict(error) from error
+    except ai_kp_service.InvalidAIOutputError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+
+
+@router.post(
+    "/campaigns/{campaign_id}/ai-kp/proposals/{proposal_id}/decision",
+    response_model=AIProposalResponse,
+)
+def decide_ai_kp_proposal(
+    campaign_id: UUID,
+    proposal_id: UUID,
+    payload: ProposalDecision,
+    session: DatabaseSession,
+) -> AIProposalResponse:
+    try:
+        return ai_kp_service.decide_proposal(
+            session, campaign_id, proposal_id, payload
+        )
+    except (
+        service.EntityNotFoundError,
+        service.VersionConflictError,
+    ) as error:
+        raise _not_found_or_conflict(error) from error
+    except (
+        case_service.InvalidCaseStateError,
+        ai_kp_service.InvalidAIOutputError,
+    ) as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error

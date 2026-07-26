@@ -5,6 +5,7 @@ import { CombatChasePage } from "./pages/CombatChasePage";
 import { CaseWorkspacePage } from "./pages/CaseWorkspacePage";
 import { RulesPage } from "./pages/RulesPage";
 import { SanityInjuryPage } from "./pages/SanityInjuryPage";
+import { AIKPPage } from "./pages/AIKPPage";
 
 type Workspace =
   | "dashboard"
@@ -118,6 +119,8 @@ export function App(): ReactElement {
         {workspace === "people" ? <CaseWorkspacePage initialKind="people" /> : null}
         {workspace === "locations" ? <CaseWorkspacePage initialKind="locations" /> : null}
         {workspace === "clues" ? <CaseWorkspacePage initialKind="clues" /> : null}
+        {workspace === "assistant" ? <AIKPPage initialView="assistant" /> : null}
+        {workspace === "proposals" ? <AIKPPage initialView="proposals" /> : null}
         {workspace !== "dashboard" &&
         workspace !== "table" &&
         workspace !== "investigators" &&
@@ -126,7 +129,9 @@ export function App(): ReactElement {
         workspace !== "clues" &&
         workspace !== "sanity" &&
         workspace !== "encounters" &&
-        workspace !== "rules" ? (
+        workspace !== "rules" &&
+        workspace !== "assistant" &&
+        workspace !== "proposals" ? (
           <section className="placeholder" aria-live="polite">
             <span className="large-sigil" aria-hidden="true">
               {active.sigil}

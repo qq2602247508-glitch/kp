@@ -249,6 +249,73 @@ class StateAuditRecord(Base):
     )
 
 
+class AIProposalRecord(Base):
+    __tablename__ = "ai_proposals"
+    __table_args__ = (
+        CheckConstraint("ruleset = 'coc7e'", name="ck_ai_proposal_ruleset_coc7e"),
+        CheckConstraint(
+            "proposal_type IN ('case_state_create', 'case_state_replace')",
+            name="ck_ai_proposal_type",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'confirmed', 'rejected')",
+            name="ck_ai_proposal_status",
+        ),
+        CheckConstraint("version >= 1", name="ck_ai_proposal_version_positive"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ruleset: Mapped[str] = mapped_column(String(20), nullable=False, default="coc7e")
+    proposal_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    case_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_entity_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    campaign_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_version: Mapped[int | None] = mapped_column(Integer)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    citation_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    model_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    model_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
+    applied_entity_id: Mapped[str | None] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ProposalAuditRecord(Base):
+    __tablename__ = "proposal_audits"
+    __table_args__ = (
+        CheckConstraint("ruleset = 'coc7e'", name="ck_proposal_audit_ruleset_coc7e"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    proposal_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_proposals.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    campaign_id: Mapped[str] = mapped_column(
+        ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ruleset: Mapped[str] = mapped_column(String(20), nullable=False, default="coc7e")
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    expected_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    before_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    after_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+
 class RuleOperationRecord(Base):
     __tablename__ = "rule_operation_logs"
     __table_args__ = (
