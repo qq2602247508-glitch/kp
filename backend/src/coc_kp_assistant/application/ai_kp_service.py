@@ -37,6 +37,22 @@ from . import case_service, service
 
 AI_KP_MODEL = "qwen3:30b-instruct"
 
+# COC7 uses percentile checks and has no cross-system AC/levels/action economy.
+# Keep an explicit boundary here because local models may have seen mixed
+# tabletop material in their training data.  A contaminated answer is safer
+# to reject and regenerate than to silently present to a Keeper.
+_CROSS_SYSTEM_MARKERS = (
+    "龙与地下城",
+    "d20",
+    "护甲等级",
+    "法术位",
+    "先攻值",
+    "挑战等级",
+    "cr值",
+    "五英尺",
+    "5英尺",
+)
+
 
 class AIKPError(RuntimeError):
     pass
@@ -252,6 +268,7 @@ class AIKPOrchestrator:
             "tool_results": snapshot,
         }
         draft = self.provider.generate(provider_payload)
+        _reject_cross_system_contamination(draft)
         used_citation_ids = set(draft.response.citation_ids)
         for proposal in draft.proposals:
             used_citation_ids.update(proposal.citation_ids)
@@ -326,6 +343,21 @@ class AIKPOrchestrator:
             ),
             proposals=tuple(proposals),
             model_name=self.provider.model_name,
+        )
+
+
+def _reject_cross_system_contamination(draft: AIKPDraft) -> None:
+    """Reject accidental D&D vocabulary before it reaches the Keeper UI."""
+
+    texts: list[str] = [draft.response.answer, *draft.response.keeper_private_hints]
+    texts.extend(draft.response.scene_suggestions)
+    for proposal in draft.proposals:
+        texts.append(json.dumps(proposal.payload, ensure_ascii=False))
+    haystack = "\n".join(texts).casefold()
+    markers = [marker for marker in _CROSS_SYSTEM_MARKERS if marker in haystack]
+    if markers:
+        raise InvalidAIOutputError(
+            "模型输出包含非 COC7 规则术语（" + ", ".join(markers) + "），已拒绝本次结果"
         )
 
 

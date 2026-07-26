@@ -110,6 +110,31 @@ def test_model_output_is_strict_json_and_rejects_unknown_fields() -> None:
         )
 
 
+def test_dnd_terms_are_rejected_before_a_coc_proposal_is_created(
+    db_session: Any,
+) -> None:
+    campaign_id = _campaign(db_session)
+    contaminated = _draft()
+    contaminated.response = AIKPResponseDraft(
+        answer="目标的护甲等级是 15，用 d20 检定。",
+        keeper_private_hints=(),
+        scene_suggestions=(),
+        citation_ids=(),
+    )
+    orchestrator = ai_kp_service.AIKPOrchestrator(
+        provider=FakeProvider(contaminated),
+        rules_reader=lambda _, __: [],
+    )
+
+    with pytest.raises(ai_kp_service.InvalidAIOutputError, match="非 COC7"):
+        orchestrator.ask(
+            db_session,
+            campaign_id,
+            AIKPRequest(question="继续推进", mode="private_hint"),
+        )
+    assert db_session.scalar(select(func.count()).select_from(AIProposalRecord)) == 0
+
+
 def test_ask_creates_pending_proposal_without_mutating_case_state(
     db_session: Any,
 ) -> None:

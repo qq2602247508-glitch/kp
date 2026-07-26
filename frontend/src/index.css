@@ -1874,6 +1874,59 @@ button:disabled {
   align-items: start;
 }
 
+.scene-progression {
+  margin: 1.25rem 0;
+  padding: 1.25rem;
+  border: 1px solid var(--line, #2d3442);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(24, 31, 45, .96), rgba(17, 22, 33, .96));
+}
+
+.scene-progression-heading,
+.scene-progression-body {
+  display: flex;
+  gap: 1.25rem;
+  justify-content: space-between;
+}
+
+.scene-progression-heading { align-items: flex-start; }
+.scene-progression-heading h3 { margin: .25rem 0; }
+.scene-progression-heading p:last-child { margin: 0; color: var(--muted, #aab3c2); }
+.scene-progression-heading .field { min-width: 15rem; }
+.scene-progression-body { margin-top: 1rem; align-items: stretch; }
+.scene-outline { flex: 1 1 55%; display: grid; gap: .55rem; }
+.scene-outline-item {
+  display: grid;
+  grid-template-columns: 2rem 1fr auto;
+  gap: .7rem;
+  align-items: center;
+  padding: .7rem .8rem;
+  border: 1px solid rgba(132, 147, 177, .2);
+  border-radius: 12px;
+  background: rgba(255,255,255,.025);
+}
+.scene-outline-item.current { border-color: var(--accent, #d9b36c); box-shadow: 0 0 0 1px rgba(217,179,108,.25); }
+.scene-outline-index { color: var(--accent, #d9b36c); font-weight: 700; text-align: center; }
+.scene-outline-item strong, .scene-outline-item small { display: block; }
+.scene-outline-item small { color: var(--muted, #aab3c2); margin-top: .2rem; }
+.scene-outline-actions { display: flex; gap: .4rem; }
+.scene-outline-actions button { padding: .4rem .65rem; }
+.scene-live-context {
+  flex: 1 1 45%;
+  padding: 1rem;
+  border-radius: 14px;
+  background: rgba(0,0,0,.18);
+}
+.scene-live-context h4 { margin: .4rem 0; font-size: 1.1rem; }
+.scene-live-context p { min-height: 3rem; color: var(--muted, #aab3c2); }
+.scene-live-context label { display: grid; gap: .35rem; margin-top: .8rem; }
+.scene-live-context textarea { resize: vertical; }
+
+@media (max-width: 820px) {
+  .scene-progression-heading, .scene-progression-body { flex-direction: column; }
+  .scene-progression-heading .field { min-width: 0; }
+}
+
 .case-list,
 .case-editor {
   display: grid;

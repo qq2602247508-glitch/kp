@@ -144,6 +144,8 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
   const [playerPreview, setPlayerPreview] = useState<PlayerCaseEntry | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [activeSceneId, setActiveSceneId] = useState("");
+  const [sceneHint, setSceneHint] = useState("");
 
   useEffect(() => {
     setKind(initialKind);
@@ -209,6 +211,26 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
       });
     return () => controller.abort();
   }, [campaignId]);
+
+  const sceneEntries = useMemo(
+    () => [...entryCache.scenes].sort((a, b) => a.sort_order - b.sort_order),
+    [entryCache.scenes],
+  );
+  const activeScene = sceneEntries.find((scene) => scene.entity_id === activeSceneId)
+    ?? sceneEntries.find((scene) => scene.status === "current")
+    ?? sceneEntries[0];
+
+  useEffect(() => {
+    if (!activeScene) {
+      setActiveSceneId("");
+      return;
+    }
+    setActiveSceneId((current) =>
+      sceneEntries.some((scene) => scene.entity_id === current)
+        ? current
+        : activeScene.entity_id,
+    );
+  }, [activeScene, sceneEntries]);
 
   useEffect(() => {
     if (!campaignId || !editing) {
@@ -340,6 +362,49 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
     }
   }
 
+  async function moveScene(scene: CaseEntry, status: "current" | "completed"): Promise<void> {
+    setBusy(true);
+    try {
+      // Scene status is the durable, campaign-scoped progression marker. Clear
+      // the previous current scene first, then promote the selected scene.
+      const current = sceneEntries.find((item) => item.status === "current");
+      if (current && current.entity_id !== scene.entity_id) {
+        const cleared = await updateCaseEntry(campaignId, "scenes", current.entity_id, {
+          title: current.title,
+          player_visible_text: current.player_visible_text,
+          keeper_truth: current.keeper_truth,
+          status: "planned",
+          session_id: current.session_id,
+          location_id: current.location_id,
+          expected_version: current.version,
+        });
+        setEntryCache((cache) => ({
+          ...cache,
+          scenes: cache.scenes.map((item) => item.entity_id === cleared.entity_id ? cleared : item),
+        }));
+      }
+      const updated = await updateCaseEntry(campaignId, "scenes", scene.entity_id, {
+        title: scene.title,
+        player_visible_text: scene.player_visible_text,
+        keeper_truth: scene.keeper_truth,
+        status,
+        session_id: scene.session_id,
+        location_id: scene.location_id,
+        expected_version: scene.version,
+      });
+      setEntryCache((cache) => ({
+        ...cache,
+        scenes: cache.scenes.map((item) => item.entity_id === updated.entity_id ? updated : item),
+      }));
+      setActiveSceneId(updated.entity_id);
+      setMessage(status === "current" ? `已进入场景：${updated.title}` : `已完成场景：${updated.title}`);
+    } catch (error: unknown) {
+      setMessage(errorMessage(error, "场景转场失败；请重新载入最新版本。"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="case-workspace">
       <section className="case-workspace-header">
@@ -395,6 +460,64 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
           </button>
         ))}
       </nav>
+
+      {(kind === "sessions" || kind === "scenes") && campaignId ? (
+        <section className="scene-progression" aria-label="章节与场景推进台">
+          <div className="scene-progression-heading">
+            <div>
+              <p className="eyebrow">CHAPTER / SCENE FLOW · COC7</p>
+              <h3>章节推进</h3>
+              <p>把场景按顺序编排；当前场景只保留一个，转场由 KP 明确确认。</p>
+            </div>
+            <label className="field">
+              <span>当前场景</span>
+              <select
+                aria-label="当前场景"
+                value={activeScene?.entity_id ?? ""}
+                onChange={(event) => {
+                  const next = sceneEntries.find((item) => item.entity_id === event.target.value);
+                  if (next) void moveScene(next, "current");
+                }}
+              >
+                <option value="">尚未编排场景</option>
+                {sceneEntries.map((scene, index) => (
+                  <option key={scene.entity_id} value={scene.entity_id}>
+                    {index + 1}. {scene.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="scene-progression-body">
+            <div className="scene-outline">
+              {sceneEntries.length === 0 ? <p className="case-empty">先在“场景”分栏创建 Scene 1。</p> : null}
+              {sceneEntries.map((scene, index) => (
+                <article className={`scene-outline-item ${scene.entity_id === activeScene?.entity_id ? "current" : ""}`} key={scene.entity_id}>
+                  <div className="scene-outline-index">{index + 1}</div>
+                  <div>
+                    <strong>{scene.title}</strong>
+                    <small>{scene.status === "current" ? "进行中" : scene.status === "completed" ? "已完成" : "待推进"}</small>
+                  </div>
+                  <div className="scene-outline-actions">
+                    {scene.status !== "current" ? <button disabled={busy} onClick={() => void moveScene(scene, "current")} type="button">进入</button> : null}
+                    {scene.status === "current" ? <button className="secondary-button" disabled={busy} onClick={() => void moveScene(scene, "completed")} type="button">完成</button> : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+            <div className="scene-live-context">
+              <span className="eyebrow">KP LIVE CONTEXT</span>
+              <h4>{activeScene?.title ?? "等待场景"}</h4>
+              <p>{activeScene?.player_visible_text || "补充本幕玩家可见叙述，作为推进台的当前场景背景。"}</p>
+              <label>
+                KP 推进记录 / AI 建议
+                <textarea rows={3} value={sceneHint} onChange={(event) => setSceneHint(event.target.value)} placeholder="记录玩家行为，或粘贴 AI 提示后再决定是否转场。" />
+              </label>
+              <small>KP 真相仅在编辑器和 AI KP 私密上下文中可见，不会进入玩家投影。</small>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <div className="case-columns">
         <section className="case-list">
