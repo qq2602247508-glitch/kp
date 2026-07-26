@@ -125,6 +125,10 @@ export type RollRequest = {
   target: number;
   difficulty: RollDifficulty;
   bonus_penalty: number;
+  dice?: {
+    units_digit: number;
+    tens_digits: number[];
+  };
 };
 
 export type RollResult = {

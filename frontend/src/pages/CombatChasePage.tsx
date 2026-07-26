@@ -49,6 +49,15 @@ export function CombatChasePage(): ReactElement {
   const [weapons, setWeapons] = useState<WeaponPolicy[]>([]);
   const [weaponKey, setWeaponKey] = useState("unarmed");
   const [damage, setDamage] = useState(1);
+  const [manualAttackRoll, setManualAttackRoll] = useState("");
+  const [combatParticipantIds, setCombatParticipantIds] = useState<string[]>([]);
+  const [turnOrderIds, setTurnOrderIds] = useState<string[]>([]);
+  const [turnIndex, setTurnIndex] = useState(0);
+  const [combatRound, setCombatRound] = useState(1);
+  const [combatActive, setCombatActive] = useState(false);
+  const [turnResolved, setTurnResolved] = useState(false);
+  const [combatNotes, setCombatNotes] = useState<string[]>([]);
+  const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [chases, setChases] = useState<Chase[]>([]);
   const [chaseId, setChaseId] = useState("");
   const [pursuerPosition, setPursuerPosition] = useState(0);
@@ -71,6 +80,15 @@ export function CombatChasePage(): ReactElement {
     () => investigators.find((item) => item.investigator_id === targetId),
     [targetId, investigators],
   );
+  const activeCombatantId = combatActive ? turnOrderIds[turnIndex] : undefined;
+  const activeCombatant = investigators.find(
+    (item) => item.investigator_id === activeCombatantId,
+  );
+  const selectedWeapon = weapons.find((item) => item.weapon_key === weaponKey);
+  const attackSkillValue = attacker && selectedWeapon
+    ? attacker.profile.skills.find((skill) => skill.skill_key === selectedWeapon.skill_key)
+      ?.current_value ?? (selectedWeapon.skill_key.startsWith("firearms_") ? 20 : 25)
+    : 0;
   const activeChase = chases.find((item) => item.chase_id === chaseId) ?? chases[0];
 
   useEffect(() => {
@@ -132,6 +150,7 @@ export function CombatChasePage(): ReactElement {
     ])
       .then(([people, chaseItems, operationItems, sessionEntries]) => {
         setInvestigators(people);
+        setCombatParticipantIds(people.map((item) => item.investigator_id));
         setAttackerId((current) => people.some((item) => item.investigator_id === current) ? current : people[0]?.investigator_id || "");
         setTargetId((current) => people.some((item) => item.investigator_id === current) ? current : people[1]?.investigator_id || "");
         setChases(chaseItems);
@@ -157,6 +176,18 @@ export function CombatChasePage(): ReactElement {
       setFailure("请选择不同的攻击者和目标。");
       return;
     }
+    if (combatActive && attacker.investigator_id !== activeCombatantId) {
+      setFailure("只能由当前行动者结算攻击；请先结束上一名参与者的回合。");
+      return;
+    }
+    if (combatActive && turnResolved) {
+      setFailure("当前行动者已经完成本轮主要行动，请结束其回合。");
+      return;
+    }
+    if (manualAttackRoll && (!Number.isInteger(Number(manualAttackRoll)) || Number(manualAttackRoll) < 1 || Number(manualAttackRoll) > 100)) {
+      setFailure("玩家 D100 结果必须是 1 到 100 的整数。");
+      return;
+    }
     setBusy(true);
     setFailure(null);
     try {
@@ -177,6 +208,12 @@ export function CombatChasePage(): ReactElement {
         target: fighting,
         difficulty: "regular",
         bonus_penalty: 0,
+        dice: manualAttackRoll
+          ? {
+            units_digit: Number(manualAttackRoll) === 100 ? 0 : Number(manualAttackRoll) % 10,
+            tens_digits: [Number(manualAttackRoll) === 100 ? 0 : Math.floor(Number(manualAttackRoll) / 10)],
+          }
+          : undefined,
       });
       const result = await resolveCombat(campaignId, {
         attacker_id: attacker.investigator_id,
@@ -195,6 +232,13 @@ export function CombatChasePage(): ReactElement {
         ),
       );
       setLogs(await listRuleOperations(campaignId));
+      const weaponName = weapon.name;
+      setCombatNotes((items) => [
+        `第 ${combatRound} 轮：${attacker.profile.name} 使用${weaponName}攻击 ${target.profile.name}；D100=${roll.roll}，需要 ≤${fighting}（困难 ≤${Math.floor(fighting / 2)}，极难 ≤${Math.floor(fighting / 5)}）；${result.hit ? `命中并造成 ${result.damage_applied ?? 0} 点伤害` : "未命中"}。`,
+        ...items,
+      ]);
+      setTurnResolved(true);
+      setManualAttackRoll("");
       setNotice(
         result.hit
           ? `命中，造成 ${result.damage_applied ?? 0} 点伤害。`
@@ -205,6 +249,67 @@ export function CombatChasePage(): ReactElement {
     } finally {
       setBusy(false);
     }
+  }
+
+  function toggleCombatParticipant(investigatorId: string): void {
+    if (combatActive) return;
+    setCombatParticipantIds((items) =>
+      items.includes(investigatorId)
+        ? items.filter((item) => item !== investigatorId)
+        : [...items, investigatorId],
+    );
+  }
+
+  function startCombat(): void {
+    const order = investigators
+      .filter((item) => combatParticipantIds.includes(item.investigator_id) && !item.conditions.includes("dead"))
+      .sort((left, right) => right.profile.characteristics.dexterity - left.profile.characteristics.dexterity)
+      .map((item) => item.investigator_id);
+    if (!caseSessionId) {
+      setFailure("请先选择案件场次。战斗回合必须归属到明确的跑团记录。");
+      return;
+    }
+    if (order.length < 2) {
+      setFailure("至少选择两名未死亡的参与者才能开始战斗。");
+      return;
+    }
+    setTurnOrderIds(order);
+    setTurnIndex(0);
+    setCombatRound(1);
+    setCombatActive(true);
+    setTurnResolved(false);
+    setAttackerId(order[0]);
+    setTargetId(order.find((id) => id !== order[0]) ?? "");
+    setCombatNotes(["战斗开始：按 DEX 从高到低排列行动顺序；枪械先发、突袭和特殊情况由 KP 按规则裁定。"]);
+    setFailure(null);
+    setNotice("战斗回合台已开始。");
+  }
+
+  function endTurn(): void {
+    if (!combatActive || turnOrderIds.length === 0) return;
+    const nextIndex = (turnIndex + 1) % turnOrderIds.length;
+    const nextRound = nextIndex === 0 ? combatRound + 1 : combatRound;
+    const nextId = turnOrderIds[nextIndex];
+    setTurnIndex(nextIndex);
+    setCombatRound(nextRound);
+    setTurnResolved(false);
+    setAttackerId(nextId);
+    setTargetId((current) => current !== nextId ? current : turnOrderIds.find((id) => id !== nextId) ?? "");
+    const name = investigators.find((item) => item.investigator_id === nextId)?.profile.name ?? nextId;
+    setCombatNotes((items) => [`第 ${nextRound} 轮：轮到 ${name}。`, ...items]);
+    setFailure(null);
+  }
+
+  function resetCombat(): void {
+    setCombatActive(false);
+    setTurnOrderIds([]);
+    setTurnIndex(0);
+    setCombatRound(1);
+    setTurnResolved(false);
+    setManualAttackRoll("");
+    setCombatNotes([]);
+    setNotice("战斗回合台已重置。已写入的伤害和规则日志不会被撤销。");
+    setFailure(null);
   }
 
   function changeCampaign(nextCampaignId: string): void {
@@ -311,11 +416,41 @@ export function CombatChasePage(): ReactElement {
       {notice ? <p className="message success-message">{notice}</p> : null}
       <div className="engine-grid">
         <article className="engine-panel">
-          <h3>战斗结算</h3>
+          <div className="combat-heading">
+            <div>
+              <h3>COC7 战斗回合台</h3>
+              <p>{combatActive ? `第 ${combatRound} 轮 · 当前行动者：${activeCombatant?.profile.name ?? "未知"}` : "先选择参与者，再按 DEX 建立行动顺序。"}</p>
+            </div>
+            <div className="engine-actions">
+              {!combatActive ? <button disabled={busy || combatParticipantIds.length < 2} onClick={startCombat} type="button">开始战斗</button> : null}
+              <button className="secondary-button" disabled={busy || (!combatActive && combatNotes.length === 0)} onClick={resetCombat} type="button">重置战斗</button>
+            </div>
+          </div>
+          <div className="combatant-picker" aria-label="战斗参与者">
+            {investigators.map((item) => (
+              <button
+                className={`combatant-card ${combatParticipantIds.includes(item.investigator_id) ? "selected" : ""} ${activeCombatantId === item.investigator_id ? "active" : ""}`}
+                disabled={combatActive}
+                key={item.investigator_id}
+                onClick={() => toggleCombatParticipant(item.investigator_id)}
+                type="button"
+              >
+                <strong>{item.profile.name}</strong>
+                <span>DEX {item.profile.characteristics.dexterity} · HP {item.hit_points} · SAN {item.sanity} · MOV {item.profile.move_rate}</span>
+                <small>{item.conditions.length ? item.conditions.join(" · ") : "状态正常"}</small>
+              </button>
+            ))}
+          </div>
+          {combatActive ? <div className="turn-order" aria-label="行动顺序">
+            {turnOrderIds.map((id, index) => {
+              const item = investigators.find((person) => person.investigator_id === id);
+              return <span className={index === turnIndex ? "active" : ""} key={id}>{index + 1}. {item?.profile.name ?? id}</span>;
+            })}
+          </div> : null}
           <div className="engine-form-grid">
             <label className="field">
               <span>攻击者</span>
-              <select value={attackerId} onChange={(event) => setAttackerId(event.target.value)}>
+              <select disabled={combatActive} value={attackerId} onChange={(event) => setAttackerId(event.target.value)}>
                 <option value="">请选择</option>
                 {investigators.map((item) => (
                   <option key={item.investigator_id} value={item.investigator_id}>
@@ -334,6 +469,17 @@ export function CombatChasePage(): ReactElement {
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="field">
+              <span>玩家 D100 结果（留空由系统掷）</span>
+              <input
+                aria-describedby="attack-roll-help"
+                max="100"
+                min="1"
+                type="number"
+                value={manualAttackRoll}
+                onChange={(event) => setManualAttackRoll(event.target.value)}
+              />
             </label>
             <label className="field">
               <span>武器</span>
@@ -355,9 +501,15 @@ export function CombatChasePage(): ReactElement {
               />
             </label>
           </div>
-          <button disabled={busy || !attacker || !target || !caseSessionId} onClick={() => void handleCombat()} type="button">
+          <p className="roll-prompt" id="attack-roll-help">
+            请掷 D100：需要 ≤ {attackSkillValue || "所选技能"}；困难成功 ≤ {attackSkillValue ? Math.floor(attackSkillValue / 2) : "—"}；极难成功 ≤ {attackSkillValue ? Math.floor(attackSkillValue / 5) : "—"}。命中后再输入武器伤害骰总值。
+          </p>
+          <div className="engine-actions">
+          <button disabled={busy || !attacker || !target || !caseSessionId || (combatActive && turnResolved)} onClick={() => void handleCombat()} type="button">
             结算攻击
           </button>
+          {combatActive ? <button className="secondary-button" disabled={busy} onClick={endTurn} type="button">结束当前行动者回合</button> : null}
+          </div>
           <p className="section-help">
             系统先写入百分骰攻击记录，再按内置 COC7 武器策略结算伤害与重伤。
           </p>
@@ -407,11 +559,15 @@ export function CombatChasePage(): ReactElement {
         </article>
       </div>
       <article className="engine-panel">
-        <h3>战斗与追逐日志</h3>
-        <div className="operation-list">
+        <div className="combat-heading">
+          <h3>战斗与追逐日志</h3>
+          <button className="secondary-button compact-button" onClick={() => setLogsCollapsed((value) => !value)} type="button">{logsCollapsed ? "+ 展开" : "− 收起"}</button>
+        </div>
+        {!logsCollapsed ? <div className="operation-list">
+          {combatNotes.map((note, index) => <div key={`${index}-${note}`}><strong>{note}</strong></div>)}
           {[...logs]
             .reverse()
-            .filter((entry) => entry.operation_type.startsWith("combat") || entry.operation_type.startsWith("chase"))
+            .filter((entry) => (entry.operation_type.startsWith("combat") || entry.operation_type.startsWith("chase")) && (!caseSessionId || entry.case_session_id === caseSessionId))
             .map((entry) => (
               <div key={entry.operation_id}>
                 <strong>{entry.operation_type}</strong>
@@ -422,7 +578,7 @@ export function CombatChasePage(): ReactElement {
                 ))}
               </div>
             ))}
-        </div>
+        </div> : <p className="section-help">日志已收起，当前案件场次的记录仍会继续写入。</p>}
       </article>
     </section>
   );

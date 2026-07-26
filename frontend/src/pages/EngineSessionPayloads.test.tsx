@@ -59,6 +59,33 @@ describe("engine session compatibility", () => {
     expect(combatBody).toMatchObject({ case_session_id: "session-1", attack_roll_id: "roll-1" });
   });
 
+  it("runs a multi-participant DEX turn order and accepts a player's D100", async () => {
+    const fetchMock = mockFetch();
+    render(<CombatChasePage />);
+    await waitFor(() => expect(screen.getByLabelText("案件场次")).toHaveValue("session-1"));
+    fireEvent.click(screen.getByRole("button", { name: "开始战斗" }));
+    expect(screen.getByText(/第 1 轮 · 当前行动者：林若岚/)).toBeInTheDocument();
+    expect(screen.getByLabelText("攻击者")).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("玩家 D100 结果（留空由系统掷）"), { target: { value: "42" } });
+    fireEvent.click(screen.getByRole("button", { name: "结算攻击" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/combat/resolve"))).toBe(true));
+    const rollBody = JSON.parse(String(fetchMock.mock.calls.find(([url]) => String(url).endsWith("/rolls"))?.[1]?.body));
+    expect(rollBody.dice).toEqual({ units_digit: 2, tens_digits: [4] });
+    expect(screen.getByRole("button", { name: "结算攻击" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "结束当前行动者回合" }));
+    expect(screen.getByText(/第 1 轮 · 当前行动者：周远/)).toBeInTheDocument();
+  });
+
+  it("resets the combat turn table without pretending to roll back persisted damage", async () => {
+    mockFetch();
+    render(<CombatChasePage />);
+    await waitFor(() => expect(screen.getByLabelText("案件场次")).toHaveValue("session-1"));
+    fireEvent.click(screen.getByRole("button", { name: "开始战斗" }));
+    fireEvent.click(screen.getByRole("button", { name: "重置战斗" }));
+    expect(screen.getByText("战斗回合台已重置。已写入的伤害和规则日志不会被撤销。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始战斗" })).toBeEnabled();
+  });
+
   it("explains why SAN cannot be recorded without a case session", async () => {
     mockFetch(false);
     render(<SanityInjuryPage />);
