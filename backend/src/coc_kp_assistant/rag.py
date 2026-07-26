@@ -14,7 +14,15 @@ PRODUCT_NAMESPACE = "local-coc-kp-assistant"
 RULESET_NAMESPACE = "coc7e"
 COLLECTION_NAME = "coc7_rules"
 EMBEDDING_MODEL = "bge-m3:latest"
+MANIFEST_SCHEMA_VERSION = 2
+CHUNKER_NAME = "coc7-heading-page"
+CHUNKER_VERSION = 1
+CHUNK_MAX_CHARS = 1200
 _CHUNK_NAMESPACE = uuid.UUID("13fd1904-a77d-58a4-940a-bb3f46d34e39")
+_DEFAULT_SEARCH_PACK_POLICY = {
+    "coc7e.core.zh-v1.2.1": ("core", "core"),
+    "coc7e.investigator-handbook.zh-v1.21": ("supplement", "investigator"),
+}
 
 
 @dataclass(frozen=True)
@@ -29,6 +37,8 @@ class Corpus:
         for record in self.records:
             if record.get("ruleset") != self.ruleset:
                 raise ValueError("record ruleset does not match the COC corpus")
+            if type(record.get("default_enabled")) is not bool:
+                raise ValueError("record default_enabled must be a boolean")
 
 
 @dataclass(frozen=True)
@@ -79,6 +89,7 @@ class CollectionState:
     exists: bool
     vector_size: int | None
     point_count: int
+    corpus_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +135,8 @@ class VectorIndex(Protocol):
     def delete_packs(self, pack_ids: set[str]) -> None: ...
 
     def upsert(self, points: list[VectorPoint]) -> None: ...
+
+    def set_corpus_digest(self, corpus_digest: str) -> None: ...
 
     def search(
         self, vector: list[float], *, allowed_pack_ids: set[str], limit: int
@@ -204,10 +217,17 @@ class QdrantLocalVectorIndex:
         vector_config = details.config.params.vectors
         if not isinstance(vector_config, qdrant_models.VectorParams):
             raise IndexCompatibilityError("named or sparse Qdrant vectors are not supported")
+        collection_metadata = details.config.metadata
+        corpus_digest = (
+            collection_metadata.get("corpus_digest")
+            if isinstance(collection_metadata, dict)
+            else None
+        )
         return CollectionState(
             exists=True,
             vector_size=vector_config.size,
             point_count=details.points_count or 0,
+            corpus_digest=corpus_digest if isinstance(corpus_digest, str) else None,
         )
 
     def prepare(self, vector_size: int, *, recreate: bool = False) -> None:
@@ -258,6 +278,14 @@ class QdrantLocalVectorIndex:
             wait=True,
         )
 
+    def set_corpus_digest(self, corpus_digest: str) -> None:
+        if not re.fullmatch(r"[0-9a-f]{64}", corpus_digest):
+            raise ValueError("corpus digest must be a lowercase SHA-256")
+        self._client.update_collection(
+            collection_name=self.collection_name,
+            metadata={"corpus_digest": corpus_digest},
+        )
+
     def search(
         self, vector: list[float], *, allowed_pack_ids: set[str], limit: int
     ) -> list[SearchHit]:
@@ -297,8 +325,10 @@ def _chunk_from_qdrant_payload(payload: dict[str, Any] | None) -> RuleChunk:
     if not isinstance(era, list) or not all(isinstance(value, str) for value in era):
         raise IndexIncompleteError("Qdrant search result has invalid era provenance")
     page = payload.get("page")
-    if page is not None and not isinstance(page, int):
+    if page is not None and (not isinstance(page, int) or isinstance(page, bool)):
         raise IndexIncompleteError("Qdrant search result has invalid page provenance")
+    enabled_by_default = _required_payload_bool(payload, "enabled_by_default")
+    legacy = _required_payload_bool(payload, "legacy")
     return RuleChunk(
         chunk_id=_required_string(payload.get("chunk_id"), "Qdrant chunk id"),
         text=_required_string(payload.get("text"), "Qdrant chunk text"),
@@ -312,10 +342,17 @@ def _chunk_from_qdrant_payload(payload: dict[str, Any] | None) -> RuleChunk:
             page=page,
             section=_required_string(payload.get("section"), "Qdrant section"),
             checksum=_required_string(payload.get("checksum"), "Qdrant checksum"),
-            enabled_by_default=payload.get("enabled_by_default") is True,
-            legacy=payload.get("legacy") is True,
+            enabled_by_default=enabled_by_default,
+            legacy=legacy,
         ),
     )
+
+
+def _required_payload_bool(payload: dict[str, Any], field: str) -> bool:
+    value = payload.get(field)
+    if type(value) is not bool:
+        raise IndexIncompleteError(f"Qdrant {field} metadata must be a boolean")
+    return value
 
 
 class RagIndexer:
@@ -392,6 +429,12 @@ class RagIndexer:
             )
         if state.vector_size != self._embedder.dimension:
             raise IndexIncompleteError("vector dimension does not match the embedding manifest")
+        corpus_digest = building_manifest["corpus_digest"]
+        assert isinstance(corpus_digest, str)
+        self._vector_index.set_corpus_digest(corpus_digest)
+        state = self._vector_index.state()
+        if state.corpus_digest != corpus_digest:
+            raise IndexIncompleteError("vector corpus identity was not persisted")
         complete_manifest = dict(building_manifest)
         complete_manifest["status"] = "complete"
         _write_manifest(self._manifest_path, complete_manifest)
@@ -439,7 +482,7 @@ class RagSearcher:
         allowed = {
             pack_id
             for pack_id, pack in packs.items()
-            if pack.get("enabled_by_default") is True and pack.get("legacy") is False
+            if _is_default_search_pack(pack_id, pack)
         } | requested
         vectors = self._embedder.embed([query.strip()])
         _validate_vectors(vectors, expected_count=1, dimension=self._embedder.dimension)
@@ -537,10 +580,12 @@ def _pack_manifest(
             "checksum": _required_string(provenance.get("sha256"), "provenance sha256"),
             "chunk_count": len(pack_chunks),
             "edition": _required_string(record.get("edition"), "edition"),
-            "enabled_by_default": record.get("default_enabled") is True,
+            "enabled_by_default": record["default_enabled"],
             "era": list(pack_chunks[0].metadata.era) if pack_chunks else [],
+            "filename": _required_string(provenance.get("filename"), "provenance filename"),
             "legacy": record.get("kind") == "legacy",
             "module": _required_string(record.get("kind"), "kind"),
+            "tier": _tier_for_module(_required_string(record.get("kind"), "kind")),
         }
         descriptor["chunk_digest"] = hashlib.sha256(
             "\n".join(chunk.chunk_id for chunk in pack_chunks).encode("utf-8")
@@ -557,27 +602,19 @@ def _make_manifest(
     packs: dict[str, dict[str, object]],
     chunks: tuple[RuleChunk, ...],
 ) -> dict[str, object]:
-    digest_input = json.dumps(
-        {
-            "packs": packs,
-            "chunk_ids": [chunk.chunk_id for chunk in chunks],
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
     return {
-        "schema_version": 1,
+        "schema_version": MANIFEST_SCHEMA_VERSION,
         "product": PRODUCT_NAMESPACE,
         "ruleset": RULESET_NAMESPACE,
         "collection": vector_index.collection_name,
         "status": status,
+        "chunker": _chunker_manifest(),
         "embedding": {
             "model": embedder.model_name,
             "dimension": embedder.dimension,
         },
         "chunk_count": len(chunks),
-        "corpus_digest": hashlib.sha256(digest_input.encode("utf-8")).hexdigest(),
+        "corpus_digest": _corpus_digest(packs),
         "packs": packs,
     }
 
@@ -610,7 +647,7 @@ def _require_compatible_manifest(
     vector_index: VectorIndex,
 ) -> None:
     expected: tuple[tuple[str, object], ...] = (
-        ("schema_version", 1),
+        ("schema_version", MANIFEST_SCHEMA_VERSION),
         ("product", PRODUCT_NAMESPACE),
         ("ruleset", RULESET_NAMESPACE),
         ("collection", vector_index.collection_name),
@@ -618,6 +655,8 @@ def _require_compatible_manifest(
     for field, value in expected:
         if manifest.get(field) != value:
             raise IndexCompatibilityError(f"index manifest {field} is incompatible")
+    if manifest.get("chunker") != _chunker_manifest():
+        raise IndexCompatibilityError("index manifest chunker is incompatible")
     embedding = manifest.get("embedding")
     if not isinstance(embedding, dict):
         raise IndexCompatibilityError("index manifest embedding is invalid")
@@ -627,7 +666,14 @@ def _require_compatible_manifest(
         raise IndexCompatibilityError("index manifest embedding dimension is incompatible")
     if not isinstance(manifest.get("chunk_count"), int):
         raise IndexCompatibilityError("index manifest chunk count is invalid")
-    _manifest_packs(manifest)
+    packs = _manifest_packs(manifest)
+    corpus_digest = manifest.get("corpus_digest")
+    if (
+        not isinstance(corpus_digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", corpus_digest)
+        or corpus_digest != _corpus_digest(packs)
+    ):
+        raise IndexCompatibilityError("index manifest corpus digest is incompatible")
 
 
 def _manifest_packs(manifest: dict[str, object]) -> dict[str, dict[str, object]]:
@@ -641,16 +687,78 @@ def _manifest_packs(manifest: dict[str, object]) -> dict[str, dict[str, object]]
         required = {
             "checksum",
             "chunk_count",
+            "chunk_digest",
             "edition",
             "enabled_by_default",
             "era",
+            "filename",
             "legacy",
             "module",
+            "tier",
         }
         if not required.issubset(descriptor):
+            missing = required - set(descriptor)
+            if "chunk_digest" in missing:
+                raise IndexCompatibilityError("index manifest pack chunk digest is missing")
             raise IndexCompatibilityError("index manifest pack entry is incomplete")
-        result[pack_id] = cast(dict[str, object], descriptor)
+        typed_descriptor = cast(dict[str, object], descriptor)
+        _validate_pack_descriptor(typed_descriptor)
+        result[pack_id] = typed_descriptor
     return result
+
+
+def _validate_pack_descriptor(descriptor: dict[str, object]) -> None:
+    for field in ("checksum", "chunk_digest"):
+        value = descriptor[field]
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            readable_field = field.replace("_", " ")
+            raise IndexCompatibilityError(
+                f"index manifest pack {readable_field} is invalid"
+            )
+    chunk_count = descriptor["chunk_count"]
+    if (
+        not isinstance(chunk_count, int)
+        or isinstance(chunk_count, bool)
+        or chunk_count < 0
+    ):
+        raise IndexCompatibilityError("index manifest pack chunk count is invalid")
+    for field in ("edition", "filename", "module", "tier"):
+        if not isinstance(descriptor[field], str) or not descriptor[field]:
+            raise IndexCompatibilityError(f"index manifest pack {field} is invalid")
+    era = descriptor["era"]
+    if not isinstance(era, list) or not all(isinstance(value, str) for value in era):
+        raise IndexCompatibilityError("index manifest pack era is invalid")
+    for field in ("enabled_by_default", "legacy"):
+        if type(descriptor[field]) is not bool:
+            raise IndexCompatibilityError(f"index manifest pack {field} is invalid")
+
+
+def _chunker_manifest() -> dict[str, object]:
+    return {
+        "name": CHUNKER_NAME,
+        "version": CHUNKER_VERSION,
+        "config": {"max_chars": CHUNK_MAX_CHARS},
+    }
+
+
+def _corpus_digest(packs: dict[str, dict[str, object]]) -> str:
+    canonical = json.dumps(
+        packs,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _is_default_search_pack(pack_id: str, pack: dict[str, object]) -> bool:
+    expected = _DEFAULT_SEARCH_PACK_POLICY.get(pack_id)
+    return (
+        expected is not None
+        and pack["enabled_by_default"] is True
+        and pack["legacy"] is False
+        and (pack["tier"], pack["module"]) == expected
+    )
 
 
 def _require_collection_matches(
@@ -663,6 +771,8 @@ def _require_collection_matches(
         raise IndexIncompleteError(f"{context} vector dimension does not match")
     if state.point_count != manifest["chunk_count"]:
         raise IndexIncompleteError(f"{context} vector point count does not match")
+    if state.corpus_digest != manifest["corpus_digest"]:
+        raise IndexCompatibilityError(f"{context} vector corpus identity does not match")
 
 
 def _validate_vectors(
@@ -674,7 +784,9 @@ def _validate_vectors(
         raise IndexIncompleteError("embedding provider returned the wrong vector dimension")
 
 
-def chunk_corpus(corpus: Corpus, *, max_chars: int = 1200) -> tuple[RuleChunk, ...]:
+def chunk_corpus(
+    corpus: Corpus, *, max_chars: int = CHUNK_MAX_CHARS
+) -> tuple[RuleChunk, ...]:
     if max_chars < 40:
         raise ValueError("max_chars must be at least 40")
     chunks: list[RuleChunk] = []
@@ -701,6 +813,22 @@ def _chunk_record(record: dict[str, object], *, max_chars: int) -> list[RuleChun
     if not isinstance(eras_value, list) or not all(isinstance(item, str) for item in eras_value):
         raise ValueError("provenance eras must be a list of strings")
     eras = tuple(cast(list[str], eras_value))
+    tier = _tier_for_module(module)
+    enabled_by_default = cast(bool, record["default_enabled"])
+    identity_metadata = json.dumps(
+        {
+            "edition": edition,
+            "enabled_by_default": enabled_by_default,
+            "era": list(eras),
+            "filename": filename,
+            "legacy": module == "legacy",
+            "module": module,
+            "tier": tier,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     result: list[RuleChunk] = []
     for unit in _source_units(record):
         for section, section_text in _heading_sections(unit.text, fallback=unit.locator):
@@ -713,6 +841,7 @@ def _chunk_record(record: dict[str, object], *, max_chars: int) -> list[RuleChun
                         unit.locator,
                         section,
                         str(ordinal),
+                        identity_metadata,
                         hashlib.sha256(text.encode("utf-8")).hexdigest(),
                     )
                 )
@@ -723,14 +852,14 @@ def _chunk_record(record: dict[str, object], *, max_chars: int) -> list[RuleChun
                         metadata=ChunkMetadata(
                             source_pack=pack_id,
                             edition=edition,
-                            tier=_tier_for_module(module),
+                            tier=tier,
                             module=module,
                             era=eras,
                             filename=filename,
                             page=unit.page,
                             section=section,
                             checksum=checksum,
-                            enabled_by_default=record.get("default_enabled") is True,
+                            enabled_by_default=enabled_by_default,
                             legacy=module == "legacy",
                         ),
                     )
