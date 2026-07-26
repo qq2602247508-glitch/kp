@@ -221,8 +221,14 @@ class RulesService:
     def search(self, query: RuleQuery) -> tuple[RuleCitation, ...]:
         hits = self._searcher.search(
             query.query,
-            options=SearchOptions(enabled_pack_ids=query.source_pack_ids),
-            limit=max(24, query.limit * 4),
+            options=SearchOptions(
+                enabled_pack_ids=query.source_pack_ids,
+                restrict_pack_ids=query.source_pack_ids,
+                editions=query.editions,
+                modules=query.modules,
+                eras=query.eras,
+            ),
+            limit=query.limit,
         )
         filtered = [hit for hit in hits if _matches_filters(hit, query)]
         ranked = sorted(filtered, key=lambda hit: (-hit.score, hit.chunk.chunk_id))

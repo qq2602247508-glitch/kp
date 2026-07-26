@@ -101,6 +101,10 @@ class SearchHit:
 @dataclass(frozen=True)
 class SearchOptions:
     enabled_pack_ids: tuple[str, ...] = ()
+    restrict_pack_ids: tuple[str, ...] = ()
+    editions: tuple[str, ...] = ()
+    modules: tuple[str, ...] = ()
+    eras: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -475,7 +479,8 @@ class RagSearcher:
             raise IndexIncompleteError("index manifest is not complete")
         _require_collection_matches(manifest, self._vector_index.state(), context="search")
         packs = _manifest_packs(manifest)
-        requested = set((options or SearchOptions()).enabled_pack_ids)
+        search_options = options or SearchOptions()
+        requested = set(search_options.enabled_pack_ids)
         unknown = requested - set(packs)
         if unknown:
             raise IndexCompatibilityError(
@@ -486,6 +491,20 @@ class RagSearcher:
             for pack_id, pack in packs.items()
             if _is_default_search_pack(pack_id, pack)
         } | requested
+        if search_options.restrict_pack_ids:
+            restricted = set(search_options.restrict_pack_ids)
+            unknown_restricted = restricted - set(packs)
+            if unknown_restricted:
+                raise IndexCompatibilityError(
+                    "requested source pack is not indexed: "
+                    + ", ".join(sorted(unknown_restricted))
+                )
+            allowed &= restricted
+        allowed = {
+            pack_id
+            for pack_id in allowed
+            if _pack_matches_search_options(packs[pack_id], search_options)
+        }
         vectors = self._embedder.embed([query.strip()])
         _validate_vectors(vectors, expected_count=1, dimension=self._embedder.dimension)
         hits = self._vector_index.search(vectors[0], allowed_pack_ids=allowed, limit=limit)
@@ -497,6 +516,17 @@ class RagSearcher:
             if hit.chunk.metadata.checksum != pack.get("checksum"):
                 raise IndexIncompleteError("vector search returned stale source provenance")
         return hits
+
+
+def _pack_matches_search_options(
+    pack: dict[str, object], options: SearchOptions
+) -> bool:
+    pack_eras = cast(list[str], pack["era"])
+    return (
+        (not options.editions or pack["edition"] in options.editions)
+        and (not options.modules or pack["module"] in options.modules)
+        and (not options.eras or bool(set(pack_eras) & set(options.eras)))
+    )
 
 
 def load_ingested_corpus(

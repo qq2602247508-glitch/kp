@@ -443,6 +443,14 @@ def test_search_excludes_optional_and_legacy_packs_until_each_is_explicitly_enab
     legacy = searcher.search(
         "rules", options=SearchOptions(enabled_pack_ids=("coc-classic.legacy.test",))
     )
+    magic_only = searcher.search(
+        "rules",
+        options=SearchOptions(
+            enabled_pack_ids=("coc7e.magic.test",),
+            editions=("7e",),
+            modules=("magic",),
+        ),
+    )
 
     assert [hit.chunk.metadata.source_pack for hit in defaults] == [
         "coc7e.core.zh-v1.2.1"
@@ -455,6 +463,9 @@ def test_search_excludes_optional_and_legacy_packs_until_each_is_explicitly_enab
         "coc7e.core.zh-v1.2.1",
         "coc-classic.legacy.test",
     }
+    assert [hit.chunk.metadata.source_pack for hit in magic_only] == [
+        "coc7e.magic.test"
+    ]
 
 
 def test_search_defaults_allow_only_approved_core_and_p1_even_if_optional_is_marked_default(

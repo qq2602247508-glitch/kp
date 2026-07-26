@@ -124,7 +124,11 @@ def test_search_applies_pack_edition_module_and_era_filters() -> None:
 
     assert [item.citation_id for item in result] == ["optional"]
     assert searcher.calls[0][1] == SearchOptions(
-        enabled_pack_ids=("coc7e.magic.zh-v1.1",)
+        enabled_pack_ids=("coc7e.magic.zh-v1.1",),
+        restrict_pack_ids=("coc7e.magic.zh-v1.1",),
+        editions=("7e",),
+        modules=("magic",),
+        eras=("modern",),
     )
 
 
