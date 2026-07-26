@@ -19,7 +19,11 @@ class Settings(BaseSettings):
         description="Dedicated application database URL.",
     )
     source_pack_root: Path = Path("./data/source-packs")
+    source_catalog_path: Path = Path("./config/source-packs.example.json")
+    generated_content_root: Path = Path("./data/generated-content/coc7")
     vector_root: Path = Path("./data/vectors")
+    backup_root: Path = Path("./data/backups")
+    ollama_base_url: str = "http://127.0.0.1:11434"
     allowed_origins: tuple[str, ...] = ("http://127.0.0.1:5180",)
     ai_kp_proposal_ttl_minutes: int = Field(default=60, ge=1, le=10_080)
 

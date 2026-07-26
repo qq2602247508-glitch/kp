@@ -20,6 +20,10 @@ import type {
   RuleSearchResponse,
   AIKPResponse,
   AIProposal,
+  BackupResult,
+  CampaignExport,
+  CampaignSourcePacks,
+  DeliveryReadiness,
 } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api/v1").replace(/\/$/, "");
@@ -384,6 +388,66 @@ export function decideAIProposal(
     `/campaigns/${campaignId}/ai-kp/proposals/${proposalId}/decision`,
     { method: "POST", body: JSON.stringify(payload) },
   );
+}
+
+export function getDeliveryReadiness(signal?: AbortSignal): Promise<DeliveryReadiness> {
+  return request<DeliveryReadiness>("/delivery/readiness", { signal });
+}
+
+export function getCampaignSourcePacks(
+  campaignId: string,
+  signal?: AbortSignal,
+): Promise<CampaignSourcePacks> {
+  return request<CampaignSourcePacks>(
+    `/campaigns/${campaignId}/source-packs`,
+    { signal },
+  );
+}
+
+export function updateCampaignSourcePacks(
+  campaignId: string,
+  expectedVersion: number,
+  enabledSourcePackIds: string[],
+): Promise<CampaignSourcePacks> {
+  return request<CampaignSourcePacks>(
+    `/campaigns/${campaignId}/source-packs`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        expected_version: expectedVersion,
+        enabled_source_pack_ids: enabledSourcePackIds,
+      }),
+    },
+  );
+}
+
+export function exportCampaign(campaignId: string): Promise<CampaignExport> {
+  return request<CampaignExport>(`/campaigns/${campaignId}/export`);
+}
+
+export function importCampaign(bundle: CampaignExport): Promise<{ campaign_id: string; status: string }> {
+  return request<{ campaign_id: string; status: string }>("/imports/campaign", {
+    method: "POST",
+    body: JSON.stringify(bundle),
+  });
+}
+
+export function createBackup(destination?: string): Promise<BackupResult> {
+  return request<BackupResult>("/delivery/backups", {
+    method: "POST",
+    body: JSON.stringify({ destination: destination || null }),
+  });
+}
+
+export function verifyBackup(path: string): Promise<{
+  valid: boolean;
+  mismatches: string[];
+  restore_performed: false;
+}> {
+  return request("/delivery/backups/verify", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
 }
 
 function ruleQueryParams(query: string, filters: RuleFilters): URLSearchParams {

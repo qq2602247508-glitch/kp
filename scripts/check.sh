@@ -5,6 +5,7 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
 ./scripts/check-domain-isolation.sh
+./scripts/check-launcher.sh
 
 require_all="${COC_KP_REQUIRE_ALL_CHECKS:-0}"
 
@@ -32,4 +33,3 @@ else
   fi
   echo "Skipping frontend checks: dependencies are not installed."
 fi
-

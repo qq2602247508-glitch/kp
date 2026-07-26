@@ -336,3 +336,66 @@ export type AIKPResponse = {
   model_name: string;
   advisory_only: true;
 };
+
+export type ReadinessItem = {
+  status: "ready" | "missing" | "failed" | "incompatible" | "unavailable";
+  [key: string]: unknown;
+};
+
+export type DeliveryReadiness = {
+  product: "local-coc-kp-assistant";
+  ruleset: "coc7e";
+  ready: boolean;
+  database: ReadinessItem;
+  sources: ReadinessItem & { ready_packs: number; failed_packs: number };
+  vector_index: ReadinessItem & { chunk_count: number };
+  models: {
+    provider: "ollama";
+    provider_status: string;
+    embedding: ReadinessItem & {
+      name: "bge-m3:latest";
+      installed: boolean;
+      download_attempted: false;
+    };
+    completion: ReadinessItem & {
+      name: "qwen3:30b-instruct";
+      installed: boolean;
+      download_attempted: false;
+    };
+  };
+};
+
+export type SourcePackSetting = {
+  pack_id: string;
+  title: string;
+  version: string;
+  edition: string;
+  kind: string;
+  default_enabled: boolean;
+  eras: string[];
+  compatible: boolean;
+  required_default: boolean;
+  enabled: boolean;
+};
+
+export type CampaignSourcePacks = {
+  campaign_id: string;
+  campaign_version: number;
+  enabled_source_pack_ids: string[];
+  packs: SourcePackSetting[];
+};
+
+export type CampaignExport = {
+  product: "local-coc-kp-assistant";
+  ruleset: "coc7e";
+  schema_version: 1;
+  namespace: "local-coc-kp-assistant/coc7e";
+  exported_at: string;
+  campaign_id: string;
+  tables: Record<string, Record<string, unknown>[]>;
+};
+
+export type BackupResult = {
+  path: string;
+  manifest: Record<string, unknown>;
+};

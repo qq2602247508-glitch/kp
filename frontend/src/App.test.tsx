@@ -80,4 +80,15 @@ describe("COC KP application shell", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/确认前不会写入案件资料/)).toBeInTheDocument();
   });
+
+  it("opens the real settings and delivery workspace", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /设置与备份/ }));
+
+    expect(
+      screen.getByRole("heading", { name: "设置、资料与可恢复交付" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建一致性备份" })).toBeInTheDocument();
+  });
 });

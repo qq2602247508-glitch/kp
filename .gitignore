@@ -19,6 +19,7 @@ data/generated-content/
 data/sources/
 data/imports/
 data/logs/
+data/backups/
 
 coverage/
 *.log

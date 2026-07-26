@@ -189,6 +189,144 @@ h1 {
   box-shadow: 0 0 8px rgba(140, 118, 81, 0.5);
 }
 
+.delivery-workspace {
+  display: grid;
+  gap: 20px;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 30px;
+}
+
+.delivery-ready,
+.delivery-warning {
+  align-self: flex-start;
+  padding: 7px 11px;
+  border: 1px solid #526957;
+  border-radius: 999px;
+  color: #c6d4b7;
+  background: #17251f;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.delivery-warning {
+  border-color: #806f4e;
+  color: #d6bd85;
+  background: #241f16;
+}
+
+.delivery-panel {
+  display: grid;
+  gap: 15px;
+  padding: 22px;
+  border: 1px solid #344239;
+  border-radius: 8px;
+  background: #101714;
+}
+
+.delivery-panel select,
+.delivery-panel input:not([type="checkbox"]):not([type="file"]) {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid #405347;
+  border-radius: 5px;
+  color: #e6e3d8;
+  background: #0b110f;
+}
+
+.readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.readiness-grid article {
+  display: grid;
+  gap: 7px;
+  padding: 13px;
+  border: 1px solid #2d3a33;
+  border-radius: 6px;
+  background: #0b110f;
+}
+
+.readiness-grid span {
+  color: #9eba9c;
+  font-size: 12px;
+}
+
+.readiness-grid span:not([data-status="ready"]) {
+  color: #d6bd85;
+}
+
+.readiness-grid small,
+.pack-toggle-list small {
+  color: #7d8b83;
+}
+
+.pack-toggle-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 8px;
+}
+
+.pack-toggle-list label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 11px;
+  border: 1px solid #2d3a33;
+  border-radius: 5px;
+}
+
+.pack-toggle-list span,
+.pack-toggle-list small {
+  display: block;
+}
+
+.pack-incompatible {
+  opacity: 0.52;
+}
+
+.delivery-panel button,
+.file-action {
+  width: fit-content;
+  padding: 9px 14px;
+  border: 1px solid #526957;
+  border-radius: 5px;
+  color: #e6e3d8;
+  background: #17251f;
+  cursor: pointer;
+}
+
+.delivery-panel button:disabled,
+.file-action:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.delivery-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.file-action input {
+  display: none;
+}
+
+.delivery-safety,
+.delivery-message {
+  color: #99a69e;
+  line-height: 1.7;
+}
+
+.delivery-message {
+  padding: 12px 15px;
+  border-left: 3px solid #759176;
+  background: #101714;
+}
+
 .ai-kp-workspace {
   display: grid;
   gap: 20px;

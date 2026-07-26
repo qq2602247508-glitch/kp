@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from coc_kp_assistant.api.schemas import (
     AuditResponse,
     BackstoryReplace,
+    BackupCreateRequest,
+    BackupVerifyRequest,
     CampaignReplace,
     CampaignResponse,
     ChaseAdvanceRequest,
@@ -31,9 +33,16 @@ from coc_kp_assistant.api.schemas import (
     RuleSearchResponse,
     SanityLossRequest,
     SkillsReplace,
+    SourcePackSelectionReplace,
     WeaponPolicyResponse,
 )
-from coc_kp_assistant.application import ai_kp_service, case_service, rule_engine_service, service
+from coc_kp_assistant.application import (
+    ai_kp_service,
+    case_service,
+    delivery_service,
+    rule_engine_service,
+    service,
+)
 from coc_kp_assistant.domain.ai_kp import (
     AIKPRequest,
     AIKPResponse,
@@ -743,6 +752,95 @@ def decide_ai_kp_proposal(
         case_service.InvalidCaseStateError,
         ai_kp_service.InvalidAIOutputError,
     ) as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+
+
+@router.get("/delivery/readiness")
+def delivery_readiness(request: Request, session: DatabaseSession) -> dict[str, Any]:
+    return delivery_service.readiness(session, request.app.state.settings)
+
+
+@router.get("/campaigns/{campaign_id}/source-packs")
+def get_campaign_source_packs(
+    campaign_id: UUID, request: Request, session: DatabaseSession
+) -> dict[str, Any]:
+    try:
+        return delivery_service.campaign_source_packs(
+            session, request.app.state.settings, campaign_id
+        )
+    except delivery_service.DeliveryValidationError as error:
+        code = status.HTTP_404_NOT_FOUND if str(error) == "campaign not found" else 422
+        raise HTTPException(status_code=code, detail=str(error)) from error
+
+
+@router.put("/campaigns/{campaign_id}/source-packs")
+def put_campaign_source_packs(
+    campaign_id: UUID,
+    payload: SourcePackSelectionReplace,
+    request: Request,
+    session: DatabaseSession,
+) -> dict[str, Any]:
+    try:
+        return delivery_service.replace_campaign_source_packs(
+            session,
+            request.app.state.settings,
+            campaign_id,
+            expected_version=payload.expected_version,
+            enabled_source_pack_ids=list(payload.enabled_source_pack_ids),
+        )
+    except delivery_service.DeliveryConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except delivery_service.DeliveryValidationError as error:
+        code = status.HTTP_404_NOT_FOUND if str(error) == "campaign not found" else 422
+        raise HTTPException(status_code=code, detail=str(error)) from error
+
+
+@router.get("/campaigns/{campaign_id}/export")
+def export_campaign(campaign_id: UUID, session: DatabaseSession) -> dict[str, Any]:
+    try:
+        return delivery_service.export_campaign(session, campaign_id)
+    except delivery_service.DeliveryValidationError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
+@router.post("/imports/campaign", status_code=status.HTTP_201_CREATED)
+def import_campaign(payload: dict[str, Any], session: DatabaseSession) -> dict[str, str]:
+    try:
+        campaign_id = delivery_service.import_campaign(session, payload)
+    except delivery_service.DeliveryConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except delivery_service.DeliveryValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+    return {"campaign_id": campaign_id, "status": "imported"}
+
+
+@router.post("/delivery/backups", status_code=status.HTTP_201_CREATED)
+def create_delivery_backup(
+    payload: BackupCreateRequest, request: Request
+) -> dict[str, Any]:
+    try:
+        return delivery_service.create_backup(
+            request.app.state.engine,
+            request.app.state.settings,
+            payload.destination,
+        )
+    except delivery_service.DeliveryConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except delivery_service.DeliveryValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
+        ) from error
+
+
+@router.post("/delivery/backups/verify")
+def verify_delivery_backup(payload: BackupVerifyRequest) -> dict[str, Any]:
+    try:
+        return delivery_service.verify_backup(payload.path)
+    except delivery_service.DeliveryValidationError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
         ) from error

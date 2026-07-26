@@ -24,6 +24,19 @@ class CampaignResponse(CampaignState):
     pass
 
 
+class SourcePackSelectionReplace(DomainModel):
+    expected_version: int = Field(ge=1)
+    enabled_source_pack_ids: tuple[str, ...] = ()
+
+
+class BackupCreateRequest(DomainModel):
+    destination: str | None = Field(default=None, max_length=2000)
+
+
+class BackupVerifyRequest(DomainModel):
+    path: str = Field(min_length=1, max_length=2000)
+
+
 class InvestigatorReplace(InvestigatorCreate):
     expected_version: int = Field(ge=1)
     hit_points: int = Field(ge=0)

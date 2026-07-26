@@ -78,6 +78,20 @@ backend/.venv/bin/python -m coc_kp_assistant.ingestion \
 lint、类型检查、测试和构建。设置 `COC_KP_REQUIRE_ALL_CHECKS=1` 可要求缺少
 任一开发环境时立即失败。
 
+## 设置与交付
+
+侧边栏“设置与备份”是实际连接后端的交付工作区，可查看数据库、资料语料、
+向量索引、`bge-m3:latest` 和 `qwen3:30b-instruct` 的就绪状态；检测只读，
+绝不自动下载模型。它还支持：
+
+- 按战役启用兼容的 COC7 资料包，并保护默认权威来源；
+- 导出/原子导入带严格 product、ruleset、schema 命名空间的完整战役 JSON；
+- 使用 SQLite online backup 和向量文件双重 checksum 创建一致性备份；
+- 校验备份但不隐式执行覆盖恢复。
+
+完整安全边界、包格式、备份算法和 E2E 限制见
+[`docs/DELIVERY.md`](docs/DELIVERY.md)。
+
 ## 目录
 
 ```text
