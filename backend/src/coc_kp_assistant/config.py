@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     source_pack_root: Path = Path("./data/source-packs")
     vector_root: Path = Path("./data/vectors")
     allowed_origins: tuple[str, ...] = ("http://127.0.0.1:5180",)
+    ai_kp_proposal_ttl_minutes: int = Field(default=60, ge=1, le=10_080)
 
 
 @lru_cache

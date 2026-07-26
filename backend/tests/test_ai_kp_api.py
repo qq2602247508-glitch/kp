@@ -94,6 +94,8 @@ def test_ai_proposal_api_requires_explicit_confirmation_before_case_write(
     assert asked.status_code == 200, asked.text
     proposal = asked.json()["proposals"][0]
     assert proposal["status"] == "pending"
+    assert proposal["is_expired"] is False
+    assert proposal["expires_at"]
     before = client.get(
         f"/api/v1/campaigns/{campaign_id}/case-state/scenes"
     )

@@ -195,7 +195,9 @@ export function AIKPPage({
                   <small>v{proposal.version} · {proposal.model_name}</small>
                 </div>
                 <span className={`proposal-status ${proposal.status}`}>
-                  {proposal.status === "pending"
+                  {proposal.status === "pending" && proposal.is_expired
+                    ? "已过期"
+                    : proposal.status === "pending"
                     ? "待确认"
                     : proposal.status === "confirmed"
                       ? "已确认"
@@ -216,7 +218,10 @@ export function AIKPPage({
               ) : (
                 <p className="proposal-evidence">仅依据当前案件上下文，无规则引用。</p>
               )}
-              {proposal.status === "pending" ? (
+              <p className="proposal-evidence">
+                有效期至 {new Date(proposal.expires_at).toLocaleString()}
+              </p>
+              {proposal.status === "pending" && !proposal.is_expired ? (
                 <div className="proposal-actions">
                   <button disabled={busy} onClick={() => void decide(proposal, "confirm")} type="button">
                     确认并写入

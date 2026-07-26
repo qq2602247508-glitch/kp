@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+import unicodedata
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from typing import Any, Protocol, cast
 from uuid import UUID
 
@@ -199,10 +201,14 @@ class AIKPOrchestrator:
         provider: AIKPProvider,
         rules_reader: Any,
         registry: ReadOnlyToolRegistry | None = None,
+        proposal_ttl_minutes: int = 60,
     ) -> None:
+        if proposal_ttl_minutes < 1:
+            raise ValueError("proposal TTL must be positive")
         self.provider = provider
         self.rules_reader = rules_reader
         self.registry = registry or ReadOnlyToolRegistry()
+        self.proposal_ttl = timedelta(minutes=proposal_ttl_minutes)
 
     def ask(
         self,
@@ -243,6 +249,8 @@ class AIKPOrchestrator:
             raise InvalidAIOutputError("AI output referenced evidence outside the whitelist")
 
         private_truths = _private_truths(snapshot)
+        case_state_revision = _case_state_revision(snapshot["case_context"])
+        expires_at = datetime.now(UTC) + self.proposal_ttl
         for proposal in draft.proposals:
             validated_payload = _validate_proposal_payload(proposal)
             _ensure_player_safe(validated_payload, private_truths)
@@ -289,7 +297,9 @@ class AIKPOrchestrator:
                     "tool_access": "fixed_read_only_registry",
                     "mode": request.mode,
                     "target_snapshot": target_snapshot,
+                    "case_state_revision": case_state_revision,
                 },
+                expires_at=expires_at,
             )
             session.add(record)
             session.flush()
@@ -350,6 +360,20 @@ def decide_proposal(
         or campaign.version != record.campaign_version
     ):
         raise service.VersionConflictError("proposal is stale or already resolved")
+    now = datetime.now(UTC)
+    if _as_utc(record.expires_at) <= now:
+        raise service.VersionConflictError("proposal has expired")
+
+    current_snapshot = ReadOnlyToolRegistry().snapshot(
+        session, campaign_id, rules_evidence=[]
+    )
+    recorded_revision = record.model_metadata.get("case_state_revision")
+    current_revision = _case_state_revision(current_snapshot["case_context"])
+    if not isinstance(recorded_revision, str) or recorded_revision != current_revision:
+        raise service.VersionConflictError("proposal is stale because case state changed")
+
+    validated_payload = _validate_record_payload(record)
+    _ensure_player_safe(validated_payload, _private_truths(current_snapshot))
 
     before = _proposal_response(record).model_dump(mode="json")
     claimed = cast(
@@ -362,8 +386,10 @@ def decide_proposal(
                 AIProposalRecord.status == "pending",
                 AIProposalRecord.version == decision.expected_version,
                 AIProposalRecord.campaign_version == campaign.version,
+                AIProposalRecord.expires_at > now,
             )
             .values(version=decision.expected_version + 1)
+            .execution_options(synchronize_session=False)
         ),
     )
     if claimed.rowcount != 1:
@@ -371,8 +397,8 @@ def decide_proposal(
         raise service.VersionConflictError("proposal is stale or already resolved")
     session.expire(record)
     session.refresh(record)
-    now = datetime.now(UTC)
     if decision.decision == "confirm":
+        record.payload = validated_payload
         applied = _apply_proposal(session, campaign_id, record)
         record.status = "confirmed"
         record.applied_entity_id = str(applied.entity_id)
@@ -445,33 +471,100 @@ def _validate_proposal_payload(proposal: Any) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if key in allowed}
 
 
+def _validate_record_payload(record: AIProposalRecord) -> dict[str, Any]:
+    try:
+        kind = CaseEntityKind(record.case_kind)
+        if record.proposal_type == "case_state_create":
+            if record.target_entity_id is not None or record.target_version is not None:
+                raise ValueError("create proposal cannot target an entity")
+            parsed = CaseEntryCreate.model_validate(record.payload)
+        elif record.proposal_type == "case_state_replace":
+            if record.target_entity_id is None or record.target_version is None:
+                raise ValueError("replace proposal is missing target identity")
+            parsed = CaseEntryReplace.model_validate(
+                {**record.payload, "expected_version": record.target_version}
+            )
+        else:
+            raise ValueError("proposal action is not allowed")
+    except (TypeError, ValueError) as error:
+        raise InvalidAIOutputError("stored AI proposal payload is invalid") from error
+    supplied = set(record.payload)
+    allowed = case_service.FIELDS_BY_KIND[kind]
+    if supplied - allowed:
+        raise InvalidAIOutputError(
+            "stored AI proposal contains fields invalid for its case kind"
+        )
+    payload = parsed.model_dump(mode="json", exclude={"expected_version"})
+    return {key: value for key, value in payload.items() if key in allowed}
+
+
+def _case_state_revision(
+    case_context: dict[str, list[dict[str, Any]]],
+) -> str:
+    stable_state: dict[str, list[dict[str, Any]]] = {}
+    for kind in sorted(case_context):
+        entries: list[dict[str, Any]] = []
+        for entry in case_context[kind]:
+            entries.append(
+                {
+                    key: value
+                    for key, value in entry.items()
+                    if key not in {"created_at", "updated_at"}
+                }
+            )
+        stable_state[kind] = sorted(
+            entries, key=lambda item: str(item.get("entity_id", ""))
+        )
+    canonical = json.dumps(
+        stable_state, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _private_truths(snapshot: dict[str, Any]) -> tuple[str, ...]:
     values: list[str] = []
     for entries in snapshot["case_context"].values():
         for entry in entries:
             truth = str(entry.get("keeper_truth") or "").strip()
-            if len(truth) >= 6:
+            if truth:
                 values.append(truth)
     return tuple(values)
+
+
+def _normalize_sensitive_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    return "".join(
+        character
+        for character in normalized
+        if unicodedata.category(character)[0] in {"L", "N"}
+    )
 
 
 def _ensure_player_safe(
     payload: dict[str, Any],
     private_truths: tuple[str, ...],
 ) -> None:
-    player_text = str(payload.get("player_visible_text") or "").strip()
+    player_text = _normalize_sensitive_text(
+        str(payload.get("player_visible_text") or "")
+    )
     generated_truth = str(payload.get("keeper_truth") or "").strip()
     secrets = (*private_truths, generated_truth)
     if player_text and any(
-        secret
+        normalized_secret
         and (
-            secret in player_text
-            or (len(player_text) >= 6 and player_text in secret)
+            normalized_secret in player_text
+            or (len(player_text) >= 2 and player_text in normalized_secret)
         )
         for secret in secrets
-        if len(secret) >= 6
+        if len(normalized_secret := _normalize_sensitive_text(secret)) >= 2
     ):
         raise PrivateTruthLeakError("player-visible draft contains KP-private truth")
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _proposal_response(record: AIProposalRecord) -> AIProposalResponse:
@@ -505,6 +598,8 @@ def _proposal_response(record: AIProposalRecord) -> AIProposalResponse:
             UUID(record.applied_entity_id) if record.applied_entity_id else None
         ),
         created_at=record.created_at,
+        expires_at=record.expires_at,
+        is_expired=_as_utc(record.expires_at) <= datetime.now(UTC),
         resolved_at=record.resolved_at,
     )
 

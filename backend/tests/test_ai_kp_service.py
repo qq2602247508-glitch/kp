@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -7,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from coc_kp_assistant.application import ai_kp_service, case_service, service
 from coc_kp_assistant.domain.ai_kp import (
@@ -196,6 +198,79 @@ def test_injection_text_cannot_expand_citations_or_leak_keeper_truth(
         )
 
 
+@pytest.mark.parametrize(
+    "obfuscated",
+    [
+        "真\u200b凶是艾达·马什",
+        "真 凶 是 艾 达 · 马 什",
+        "真，凶，是，艾，达，·，马，什",
+        "真凶是ＡＩＤＡ",  # NFKC/case-fold still protects mixed-width secrets.
+    ],
+)
+def test_player_projection_secret_detection_normalizes_obfuscation(
+    db_session: Any,
+    obfuscated: str,
+) -> None:
+    campaign_id = _campaign(db_session)
+    private_truth = "真凶是艾达·马什"
+    if "ＡＩＤＡ" in obfuscated:
+        private_truth = "真凶是aida"
+    case_service.create_entry(
+        db_session,
+        campaign_id,
+        CaseEntityKind.CLUES,
+        CaseEntryCreate(title="秘密", keeper_truth=private_truth),
+    )
+    orchestrator = ai_kp_service.AIKPOrchestrator(
+        provider=FakeProvider(_draft(player_text=obfuscated)),
+        rules_reader=lambda _: [
+            {
+                "citation_id": "rule-1",
+                "excerpt": "普通证据",
+                "filename": "core.pdf",
+                "page": 2,
+                "section": "证据",
+            }
+        ],
+    )
+
+    with pytest.raises(ai_kp_service.PrivateTruthLeakError):
+        orchestrator.ask(
+            db_session,
+            campaign_id,
+            AIKPRequest(question="生成玩家材料", mode="scenario_draft"),
+        )
+
+
+def test_short_private_truth_is_protected(db_session: Any) -> None:
+    campaign_id = _campaign(db_session)
+    case_service.create_entry(
+        db_session,
+        campaign_id,
+        CaseEntityKind.CLUES,
+        CaseEntryCreate(title="秘密", keeper_truth="真凶"),
+    )
+    orchestrator = ai_kp_service.AIKPOrchestrator(
+        provider=FakeProvider(_draft(player_text="信件指出：真 凶就在船上。")),
+        rules_reader=lambda _: [
+            {
+                "citation_id": "rule-1",
+                "excerpt": "普通证据",
+                "filename": "core.pdf",
+                "page": 2,
+                "section": "证据",
+            }
+        ],
+    )
+
+    with pytest.raises(ai_kp_service.PrivateTruthLeakError):
+        orchestrator.ask(
+            db_session,
+            campaign_id,
+            AIKPRequest(question="生成玩家材料", mode="scenario_draft"),
+        )
+
+
 def test_confirm_is_atomic_versioned_and_reject_is_audited(db_session: Any) -> None:
     campaign_id = _campaign(db_session)
     orchestrator = ai_kp_service.AIKPOrchestrator(
@@ -251,3 +326,121 @@ def test_confirm_is_atomic_versioned_and_reject_is_audited(db_session: Any) -> N
     )
     assert rejected.status == "rejected"
     assert rejected.rejection_reason == "不符合当前节奏"
+
+
+def test_create_proposal_fails_closed_after_case_state_changes(
+    db_session: Any,
+) -> None:
+    campaign_id = _campaign(db_session)
+    orchestrator = ai_kp_service.AIKPOrchestrator(
+        provider=FakeProvider(_draft()),
+        rules_reader=lambda _: [
+            {
+                "citation_id": "rule-1",
+                "excerpt": "普通证据",
+                "filename": "core.pdf",
+                "page": 2,
+                "section": "证据",
+            }
+        ],
+    )
+    proposal = orchestrator.ask(
+        db_session,
+        campaign_id,
+        AIKPRequest(question="生成场景", mode="scenario_draft"),
+    ).proposals[0]
+    case_service.create_entry(
+        db_session,
+        campaign_id,
+        CaseEntityKind.CLUES,
+        CaseEntryCreate(title="新线索", keeper_truth="真凶"),
+    )
+
+    with pytest.raises(
+        service.VersionConflictError, match="case state changed"
+    ):
+        ai_kp_service.decide_proposal(
+            db_session,
+            campaign_id,
+            proposal.proposal_id,
+            ProposalDecision(expected_version=1, decision="confirm"),
+        )
+    assert db_session.scalar(select(func.count()).select_from(CaseSceneRecord)) == 0
+
+
+def test_expired_proposal_cannot_be_confirmed(db_session: Any) -> None:
+    campaign_id = _campaign(db_session)
+    orchestrator = ai_kp_service.AIKPOrchestrator(
+        provider=FakeProvider(_draft()),
+        rules_reader=lambda _: [
+            {
+                "citation_id": "rule-1",
+                "excerpt": "普通证据",
+                "filename": "core.pdf",
+                "page": 2,
+                "section": "证据",
+            }
+        ],
+        proposal_ttl_minutes=1,
+    )
+    proposal = orchestrator.ask(
+        db_session,
+        campaign_id,
+        AIKPRequest(question="生成场景", mode="scenario_draft"),
+    ).proposals[0]
+    record = db_session.get(AIProposalRecord, str(proposal.proposal_id))
+    assert record is not None
+    record.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.commit()
+
+    listed = ai_kp_service.list_proposals(db_session, campaign_id)
+    assert listed[0].is_expired is True
+    with pytest.raises(service.VersionConflictError, match="expired"):
+        ai_kp_service.decide_proposal(
+            db_session,
+            campaign_id,
+            proposal.proposal_id,
+            ProposalDecision(expected_version=1, decision="confirm"),
+        )
+
+
+def test_confirmation_revalidates_tampered_player_projection(
+    db_session: Any,
+) -> None:
+    campaign_id = _campaign(db_session)
+    case_service.create_entry(
+        db_session,
+        campaign_id,
+        CaseEntityKind.CLUES,
+        CaseEntryCreate(title="秘密", keeper_truth="真凶"),
+    )
+    orchestrator = ai_kp_service.AIKPOrchestrator(
+        provider=FakeProvider(_draft()),
+        rules_reader=lambda _: [
+            {
+                "citation_id": "rule-1",
+                "excerpt": "普通证据",
+                "filename": "core.pdf",
+                "page": 2,
+                "section": "证据",
+            }
+        ],
+    )
+    proposal = orchestrator.ask(
+        db_session,
+        campaign_id,
+        AIKPRequest(question="生成场景", mode="scenario_draft"),
+    ).proposals[0]
+    record = db_session.get(AIProposalRecord, str(proposal.proposal_id))
+    assert record is not None
+    record.payload["player_visible_text"] = "真\u200b凶"
+    flag_modified(record, "payload")
+    db_session.commit()
+
+    with pytest.raises(ai_kp_service.PrivateTruthLeakError):
+        ai_kp_service.decide_proposal(
+            db_session,
+            campaign_id,
+            proposal.proposal_id,
+            ProposalDecision(expected_version=1, decision="confirm"),
+        )

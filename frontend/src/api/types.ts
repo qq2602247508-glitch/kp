@@ -322,6 +322,8 @@ export type AIProposal = {
   rejection_reason: string | null;
   applied_entity_id: string | null;
   created_at: string;
+  expires_at: string;
+  is_expired: boolean;
   resolved_at: string | null;
 };
 

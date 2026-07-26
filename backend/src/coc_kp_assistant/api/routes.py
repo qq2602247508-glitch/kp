@@ -109,6 +109,7 @@ def get_ai_kp_orchestrator(
         existing = ai_kp_service.AIKPOrchestrator(
             provider=ai_kp_service.OllamaAIKPProvider(),
             rules_reader=read_rules,
+            proposal_ttl_minutes=request.app.state.settings.ai_kp_proposal_ttl_minutes,
         )
         request.app.state.ai_kp_orchestrator = existing
     return cast(ai_kp_service.AIKPOrchestrator, existing)

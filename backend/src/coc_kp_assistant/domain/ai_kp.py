@@ -66,6 +66,8 @@ class AIProposalResponse(DomainModel):
     rejection_reason: str | None
     applied_entity_id: UUID | None
     created_at: datetime
+    expires_at: datetime
+    is_expired: bool
     resolved_at: datetime | None
 
 
