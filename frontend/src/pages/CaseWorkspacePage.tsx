@@ -382,6 +382,9 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
           ...cache,
           scenes: cache.scenes.map((item) => item.entity_id === cleared.entity_id ? cleared : item),
         }));
+        if (editing?.entity_id === cleared.entity_id) {
+          beginEdit(cleared);
+        }
       }
       const updated = await updateCaseEntry(campaignId, "scenes", scene.entity_id, {
         title: scene.title,
@@ -396,6 +399,9 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
         ...cache,
         scenes: cache.scenes.map((item) => item.entity_id === updated.entity_id ? updated : item),
       }));
+      if (editing?.entity_id === updated.entity_id) {
+        beginEdit(updated);
+      }
       setActiveSceneId(updated.entity_id);
       setMessage(status === "current" ? `已进入场景：${updated.title}` : `已完成场景：${updated.title}`);
     } catch (error: unknown) {

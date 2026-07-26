@@ -112,7 +112,11 @@ export function PeopleCodexPage(): ReactElement {
       setCampaigns(items);
       const selected = chooseAvailableCampaign(items.map((item) => item.campaign_id), "");
       setCampaignId(selected);
-    }).catch(() => setMessage("无法读取案件。"));
+    }).catch((error: unknown) => {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        setMessage("无法读取案件。");
+      }
+    });
     return () => controller.abort();
   }, []);
 
@@ -122,7 +126,11 @@ export function PeopleCodexPage(): ReactElement {
     if (!campaignId) { setEntries([]); return; }
     const controller = new AbortController();
     listCaseEntries(campaignId, "people", controller.signal)
-      .then(setEntries).catch(() => setMessage("无法读取人物图鉴。"));
+      .then(setEntries).catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setMessage("无法读取人物图鉴。");
+        }
+      });
     return () => controller.abort();
   }, [campaignId]);
 
