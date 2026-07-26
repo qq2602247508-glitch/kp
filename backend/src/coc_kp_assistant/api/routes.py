@@ -14,9 +14,11 @@ from coc_kp_assistant.api.schemas import (
     ChaseCreateRequest,
     ChaseResponse,
     CombatRequest,
+    DyingCheckRequest,
     EngineCitationResponse,
     EngineOperationResponse,
     InjuryRequest,
+    InsanityTransitionRequest,
     InvestigatorReplace,
     InvestigatorResponse,
     RecordedRollRequest,
@@ -80,17 +82,13 @@ def _not_found_or_conflict(error: Exception) -> HTTPException:
 
 def _case_state_error(error: Exception) -> HTTPException:
     if isinstance(error, case_service.InvalidCaseStateError):
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        )
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
     return _not_found_or_conflict(error)
 
 
 def _rule_engine_error(error: Exception) -> HTTPException:
     if isinstance(error, rule_engine_service.InvalidRuleOperationError):
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        )
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
     return _not_found_or_conflict(error)
 
 
@@ -233,9 +231,7 @@ def delete_case_entry(
     expected_version: Annotated[int, Query(ge=1)],
 ) -> Response:
     try:
-        case_service.delete_entry(
-            session, campaign_id, kind, entity_id, expected_version
-        )
+        case_service.delete_entry(session, campaign_id, kind, entity_id, expected_version)
     except (service.EntityNotFoundError, service.VersionConflictError) as error:
         raise _case_state_error(error) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -259,9 +255,7 @@ def create_investigator(
     "/campaigns/{campaign_id}/investigators",
     response_model=list[InvestigatorResponse],
 )
-def list_investigators(
-    campaign_id: UUID, session: DatabaseSession
-) -> list[InvestigatorResponse]:
+def list_investigators(campaign_id: UUID, session: DatabaseSession) -> list[InvestigatorResponse]:
     try:
         return service.list_investigators(session, campaign_id)
     except service.EntityNotFoundError as error:
@@ -357,9 +351,7 @@ def apply_sanity_loss(
     session: DatabaseSession,
 ) -> EngineOperationResponse:
     try:
-        return rule_engine_service.apply_sanity_loss(
-            session, campaign_id, investigator_id, payload
-        )
+        return rule_engine_service.apply_sanity_loss(session, campaign_id, investigator_id, payload)
     except (
         service.EntityNotFoundError,
         service.VersionConflictError,
@@ -379,10 +371,51 @@ def apply_injury(
     session: DatabaseSession,
 ) -> EngineOperationResponse:
     try:
-        return rule_engine_service.apply_injury(
+        return rule_engine_service.apply_injury(session, campaign_id, investigator_id, payload)
+    except (
+        service.EntityNotFoundError,
+        service.VersionConflictError,
+        rule_engine_service.InvalidRuleOperationError,
+    ) as error:
+        raise _rule_engine_error(error) from error
+
+
+@router.post(
+    "/campaigns/{campaign_id}/investigators/{investigator_id}/dying-check",
+    response_model=EngineOperationResponse,
+)
+def dying_check(
+    campaign_id: UUID, investigator_id: UUID, payload: DyingCheckRequest, session: DatabaseSession
+) -> EngineOperationResponse:
+    try:
+        return rule_engine_service.apply_dying_check(session, campaign_id, investigator_id, payload)
+    except (
+        service.EntityNotFoundError,
+        service.VersionConflictError,
+        rule_engine_service.InvalidRuleOperationError,
+    ) as error:
+        raise _rule_engine_error(error) from error
+
+
+@router.post(
+    "/campaigns/{campaign_id}/investigators/{investigator_id}/insanity-transition",
+    response_model=EngineOperationResponse,
+)
+def insanity_transition(
+    campaign_id: UUID,
+    investigator_id: UUID,
+    payload: InsanityTransitionRequest,
+    session: DatabaseSession,
+) -> EngineOperationResponse:
+    try:
+        return rule_engine_service.apply_insanity_transition(
             session, campaign_id, investigator_id, payload
         )
-    except (service.EntityNotFoundError, service.VersionConflictError) as error:
+    except (
+        service.EntityNotFoundError,
+        service.VersionConflictError,
+        rule_engine_service.InvalidRuleOperationError,
+    ) as error:
         raise _rule_engine_error(error) from error
 
 
@@ -397,9 +430,7 @@ def apply_recovery(
     session: DatabaseSession,
 ) -> EngineOperationResponse:
     try:
-        return rule_engine_service.apply_recovery(
-            session, campaign_id, investigator_id, payload
-        )
+        return rule_engine_service.apply_recovery(session, campaign_id, investigator_id, payload)
     except (
         service.EntityNotFoundError,
         service.VersionConflictError,
@@ -485,9 +516,7 @@ def advance_chase(
     session: DatabaseSession,
 ) -> ChaseResponse:
     try:
-        return rule_engine_service.advance_chase(
-            session, campaign_id, chase_id, payload
-        )
+        return rule_engine_service.advance_chase(session, campaign_id, chase_id, payload)
     except (
         service.EntityNotFoundError,
         service.VersionConflictError,
@@ -509,9 +538,7 @@ def list_rule_operations(
         raise _rule_engine_error(error) from error
 
 
-@router.post(
-    "/rolls", response_model=RecordedRollResponse, status_code=status.HTTP_201_CREATED
-)
+@router.post("/rolls", response_model=RecordedRollResponse, status_code=status.HTTP_201_CREATED)
 def record_roll(payload: RecordedRollRequest, session: DatabaseSession) -> RecordedRollResponse:
     try:
         return service.record_roll(session, payload)
@@ -555,8 +582,7 @@ def search_rules(
     return RuleSearchResponse(
         query=query.query,
         results=tuple(
-            RuleCitationResponse.model_validate(result, from_attributes=True)
-            for result in results
+            RuleCitationResponse.model_validate(result, from_attributes=True) for result in results
         ),
     )
 

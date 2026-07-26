@@ -207,8 +207,27 @@ class RecoveryRequest(DomainModel):
     injury_id: UUID
     healing_roll: int | None = Field(default=None, ge=1, le=3)
     medicine_roll_id: UUID | None = None
+    first_aid_roll_id: UUID | None = None
     constitution_roll_id: UUID | None = None
     period_key: str | None = Field(default=None, min_length=1, max_length=120)
+    session_key: str | None = Field(default=None, max_length=120)
+    case_session_id: UUID
+
+
+class DyingCheckRequest(DomainModel):
+    expected_version: int = Field(ge=1)
+    constitution_roll_id: UUID
+    period_key: str = Field(min_length=1, max_length=120)
+    session_key: str | None = Field(default=None, max_length=120)
+    case_session_id: UUID
+
+
+class InsanityTransitionRequest(DomainModel):
+    expected_version: int = Field(ge=1)
+    transition: str = Field(pattern=r"^(bout_started|bout_ended|recovered)$")
+    period_key: str | None = Field(default=None, min_length=1, max_length=120)
+    evidence: str | None = Field(default=None, min_length=1, max_length=500)
+    treatment_roll_id: UUID | None = None
     session_key: str | None = Field(default=None, max_length=120)
     case_session_id: UUID
 
@@ -248,6 +267,12 @@ class EngineOperationResponse(DomainModel):
     hit: bool | None = None
     weapon_key: str | None = None
     attack_roll_id: UUID | None = None
+    passed: bool | None = None
+    period_key: str | None = None
+    terminal: bool | None = None
+    stabilized: bool | None = None
+    transition: str | None = None
+    evidence: str | None = None
     created_at: datetime
 
 

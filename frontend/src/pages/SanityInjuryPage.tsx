@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState, type ReactElement } from "react";
 import {
   ApiError,
   applyInjury,
+  applyDyingCheck,
+  applyInsanityTransition,
   applyRecovery,
   applySanityLoss,
   listCampaigns,
@@ -120,7 +122,7 @@ export function SanityInjuryPage(): ReactElement {
   }, [campaignId]);
 
   async function execute(
-    action: "sanity" | "injury" | "recovery",
+    action: "sanity" | "injury" | "recovery" | "dying" | "boutStart" | "boutEnd" | "insanityRecovery",
   ): Promise<void> {
     if (!selected) {
       setFailure("请先选择调查员。");
@@ -169,7 +171,11 @@ export function SanityInjuryPage(): ReactElement {
                 session_key: sessionKey,
                 case_session_id: caseSessionId,
               })
-            : await applyRecovery(campaignId, selected.investigator_id, {
+            : action === "dying"
+              ? await applyDyingCheck(campaignId, selected.investigator_id, { expected_version: selected.version, constitution_roll_id: (await resolveRoll({ campaign_id: campaignId, case_session_id: caseSessionId, investigator_id: selected.investigator_id, skill_key: "constitution", label: "濒死／稳定 CON 检定", target: selected.profile.characteristics.constitution, difficulty: "regular", bonus_penalty: 0 })).roll_id, period_key: periodKey, session_key: sessionKey, case_session_id: caseSessionId })
+              : action === "boutStart" || action === "boutEnd" || action === "insanityRecovery"
+                ? await applyInsanityTransition(campaignId, selected.investigator_id, { expected_version: selected.version, transition: action === "boutStart" ? "bout_started" : action === "boutEnd" ? "bout_ended" : "recovered", evidence: action === "insanityRecovery" ? reason : undefined, period_key: periodKey, session_key: sessionKey, case_session_id: caseSessionId, ...(action === "insanityRecovery" && selected.conditions.includes("indefinite_insanity") ? { treatment_roll_id: (await resolveRoll({ campaign_id: campaignId, case_session_id: caseSessionId, investigator_id: selected.investigator_id, skill_key: "psychoanalysis", label: "不定性疯狂心理分析治疗", target: selected.profile.skills.find((skill) => skill.skill_key === "psychoanalysis")?.current_value ?? 1, difficulty: "regular", bonus_penalty: 0 })).roll_id } : {}) })
+                : await applyRecovery(campaignId, selected.investigator_id, {
                 expected_version: selected.version,
                 care_type: careType,
                 injury_id: resolvedInjuryId,
@@ -210,6 +216,9 @@ export function SanityInjuryPage(): ReactElement {
                         ).roll_id,
                       }
                     : {}),
+                ...(careType === "first_aid"
+                  ? { first_aid_roll_id: (await resolveRoll({ campaign_id: campaignId, case_session_id: caseSessionId, investigator_id: selected.investigator_id, skill_key: "first_aid", label: "急救检定", target: selected.profile.skills.find((skill) => skill.skill_key === "first_aid")?.current_value ?? 1, difficulty: "regular", bonus_penalty: 0 })).roll_id }
+                  : {}),
               });
       setLatest(result);
       if (action === "injury" && result.injury_id) setInjuryId(result.injury_id);
@@ -350,6 +359,12 @@ export function SanityInjuryPage(): ReactElement {
           <button className="secondary-button" disabled={busy || !selected || !caseSessionId} onClick={() => void execute("recovery")} type="button">
             {careType === "first_aid" ? "急救恢复" : careType === "medicine" ? "医学恢复（掷医学）" : "自然恢复（掷 CON）"}
           </button>
+          <div className="engine-form-row">
+            <button className="secondary-button" disabled={busy || !selected || !caseSessionId} onClick={() => void execute("dying")} type="button">濒死／稳定 CON 检定</button>
+            <button className="secondary-button" disabled={busy || !selected || !caseSessionId} onClick={() => void execute("boutStart")} type="button">开始疯狂发作</button>
+            <button className="secondary-button" disabled={busy || !selected || !caseSessionId} onClick={() => void execute("boutEnd")} type="button">结束疯狂发作</button>
+            <button className="secondary-button" disabled={busy || !selected || !caseSessionId} onClick={() => void execute("insanityRecovery")} type="button">以原因栏记录休息证据后恢复</button>
+          </div>
           {latest ? (
             <div className="citation-card">
               <strong>本次判定引用</strong>

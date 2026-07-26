@@ -12,9 +12,11 @@ from coc_kp_assistant.api.schemas import (
     ChaseParticipantState,
     ChaseResponse,
     CombatRequest,
+    DyingCheckRequest,
     EngineCitationResponse,
     EngineOperationResponse,
     InjuryRequest,
+    InsanityTransitionRequest,
     RecoveryRequest,
     RuleOperationLogResponse,
     SanityLossRequest,
@@ -67,8 +69,7 @@ def _citation_items(data: dict[str, Any]) -> tuple[EngineCitationResponse, ...]:
         legacy = legacy_by_id.get(legacy_id) if isinstance(legacy_id, str) else None
         if legacy is not None:
             return tuple(
-                EngineCitationResponse.model_validate(citation.as_dict())
-                for citation in legacy
+                EngineCitationResponse.model_validate(citation.as_dict()) for citation in legacy
             )
         raw_items = [data]
     return tuple(
@@ -308,6 +309,10 @@ def apply_injury(
     record, before = _claim_investigator(
         session, campaign_id, investigator_id, payload.expected_version
     )
+    if "dead" in record.conditions:
+        raise InvalidRuleOperationError(
+            "a dead investigator cannot receive further engine injury changes"
+        )
     maximum_hit_points = (record.constitution + record.size) // 10
     record.hit_points, conditions = injury_state(
         hit_points=record.hit_points,
@@ -377,9 +382,54 @@ def apply_recovery(
     record, before = _claim_investigator(
         session, campaign_id, investigator_id, payload.expected_version
     )
-    if "dying" in record.conditions:
-        raise InvalidRuleOperationError("ordinary recovery cannot treat a dying investigator")
+    if "dead" in record.conditions:
+        raise InvalidRuleOperationError("a dead investigator cannot recover")
     if payload.care_type == "first_aid":
+        if payload.first_aid_roll_id is None:
+            raise InvalidRuleOperationError("first aid recovery requires a recorded first_aid roll")
+        roll = _roll_for(
+            session,
+            roll_id=payload.first_aid_roll_id,
+            campaign_id=campaign_id,
+            investigator_id=investigator_id,
+            case_session_id=payload.case_session_id,
+            skill_key="first_aid",
+            target=_current_skill(record, "first_aid"),
+        )
+        if not _passed(roll):
+            raise InvalidRuleOperationError("first aid roll must pass")
+        if "dying" in record.conditions:
+            conditions = set(record.conditions)
+            conditions.discard("dying")
+            conditions.add("stabilized")
+            record.hit_points = 1
+            record.conditions = sorted(conditions)
+            output = {"healed": 1, "care_type": "first_aid", "stabilized": True}
+            operation = _add_operation(
+                session,
+                campaign_id=campaign_id,
+                operation_type="stabilize",
+                subject_id=record.id,
+                case_session_id=payload.case_session_id,
+                session_key=payload.session_key,
+                input_data=payload.model_dump(mode="json"),
+                output_data=output,
+                citations=(INJURY_CITATION, RECOVERY_CITATION),
+            )
+            session.flush()
+            service._audit(
+                session,
+                campaign_id=record.campaign_id,
+                action="stabilize",
+                entity_type="investigator",
+                entity_id=record.id,
+                expected_version=payload.expected_version,
+                before=before,
+                after=service._investigator_response(record).model_dump(mode="json"),
+            )
+            response = _operation_response(operation, record)
+            session.commit()
+            return response
         healing = 1
     elif payload.care_type == "medicine":
         if payload.medicine_roll_id is None:
@@ -395,6 +445,8 @@ def apply_recovery(
         )
         if not _passed(roll):
             raise InvalidRuleOperationError("medicine roll must pass")
+        if "dying" in record.conditions:
+            raise InvalidRuleOperationError("medicine cannot silently clear dying; stabilize first")
         healing = recovery_amount("medicine", payload.healing_roll)
     else:
         if payload.constitution_roll_id is None or payload.period_key is None:
@@ -426,7 +478,10 @@ def apply_recovery(
     healed = min(healing, maximum_hit_points - record.hit_points)
     record.hit_points += healed
     conditions = set(record.conditions)
-    if record.hit_points > 0:
+    if "stabilized" in conditions and payload.care_type == "medicine":
+        conditions.discard("stabilized")
+        conditions.discard("unconscious")
+    elif record.hit_points > 0:
         conditions.discard("unconscious")
     if record.hit_points >= (maximum_hit_points + 1) // 2:
         conditions.discard("major_wound")
@@ -459,6 +514,167 @@ def apply_recovery(
     return response
 
 
+def apply_dying_check(
+    session: Session, campaign_id: UUID, investigator_id: UUID, payload: DyingCheckRequest
+) -> EngineOperationResponse:
+    _required_case_session(session, campaign_id, payload.case_session_id)
+    duplicate = select(RuleOperationRecord.id).where(
+        RuleOperationRecord.campaign_id == str(campaign_id),
+        RuleOperationRecord.subject_id == str(investigator_id),
+        RuleOperationRecord.operation_type == "dying_check",
+        RuleOperationRecord.input_data["period_key"].as_string() == payload.period_key,
+    )
+    if session.scalar(duplicate) is not None:
+        raise InvalidRuleOperationError("dying check already recorded for this period")
+    record, before = _claim_investigator(
+        session, campaign_id, investigator_id, payload.expected_version
+    )
+    if "dead" in record.conditions:
+        raise InvalidRuleOperationError("a dead investigator cannot make dying checks")
+    if not ({"dying", "stabilized"} & set(record.conditions)):
+        raise InvalidRuleOperationError("dying checks require dying or stabilized condition")
+    roll = _roll_for(
+        session,
+        roll_id=payload.constitution_roll_id,
+        campaign_id=campaign_id,
+        investigator_id=investigator_id,
+        case_session_id=payload.case_session_id,
+        skill_key="constitution",
+        target=record.constitution,
+    )
+    passed = _passed(roll)
+    conditions = set(record.conditions)
+    if not passed:
+        if "stabilized" in conditions:
+            conditions.discard("stabilized")
+            conditions.add("dying")
+            record.hit_points = 0
+        else:
+            conditions.discard("dying")
+            conditions.add("dead")
+    record.conditions = sorted(conditions)
+    operation = _add_operation(
+        session,
+        campaign_id=campaign_id,
+        operation_type="dying_check",
+        subject_id=record.id,
+        case_session_id=payload.case_session_id,
+        session_key=payload.session_key,
+        input_data=payload.model_dump(mode="json"),
+        output_data={
+            "passed": passed,
+            "period_key": payload.period_key,
+            "terminal": "dead" in conditions,
+        },
+        citations=(INJURY_CITATION,),
+    )
+    session.flush()
+    service._audit(
+        session,
+        campaign_id=record.campaign_id,
+        action="dying_check",
+        entity_type="investigator",
+        entity_id=record.id,
+        expected_version=payload.expected_version,
+        before=before,
+        after=service._investigator_response(record).model_dump(mode="json"),
+    )
+    response = _operation_response(operation, record)
+    session.commit()
+    return response
+
+
+def apply_insanity_transition(
+    session: Session, campaign_id: UUID, investigator_id: UUID, payload: InsanityTransitionRequest
+) -> EngineOperationResponse:
+    _required_case_session(session, campaign_id, payload.case_session_id)
+    record, before = _claim_investigator(
+        session, campaign_id, investigator_id, payload.expected_version
+    )
+    conditions = set(record.conditions)
+    if payload.transition == "bout_started":
+        if "temporary_insanity" not in conditions:
+            raise InvalidRuleOperationError("bout start requires temporary_insanity")
+        conditions.add("bout_of_madness")
+    elif payload.transition == "bout_ended":
+        if "bout_of_madness" not in conditions:
+            raise InvalidRuleOperationError("bout end requires an active bout_of_madness")
+        conditions.discard("bout_of_madness")
+    elif "temporary_insanity" in conditions:
+        if not payload.evidence:
+            raise InvalidRuleOperationError(
+                "temporary insanity recovery requires explicit elapsed/rest evidence"
+            )
+        conditions.discard("temporary_insanity")
+        conditions.discard("bout_of_madness")
+    elif "indefinite_insanity" in conditions:
+        if payload.treatment_roll_id is None or payload.period_key is None:
+            raise InvalidRuleOperationError(
+                "indefinite insanity recovery requires treatment roll and period key"
+            )
+        duplicate = select(RuleOperationRecord.id).where(
+            RuleOperationRecord.campaign_id == str(campaign_id),
+            RuleOperationRecord.subject_id == str(investigator_id),
+            RuleOperationRecord.operation_type == "insanity_transition",
+            RuleOperationRecord.input_data["period_key"].as_string() == payload.period_key,
+        )
+        if session.scalar(duplicate) is not None:
+            raise InvalidRuleOperationError("insanity recovery already recorded for this period")
+        raw_roll = _roll_for(
+            session,
+            roll_id=payload.treatment_roll_id,
+            campaign_id=campaign_id,
+            investigator_id=investigator_id,
+            case_session_id=payload.case_session_id,
+        )
+        if raw_roll.skill_key not in {"medicine", "psychoanalysis"}:
+            raise InvalidRuleOperationError(
+                "indefinite insanity recovery requires medicine or psychoanalysis"
+            )
+        roll = _roll_for(
+            session,
+            roll_id=payload.treatment_roll_id,
+            campaign_id=campaign_id,
+            investigator_id=investigator_id,
+            case_session_id=payload.case_session_id,
+            skill_key=raw_roll.skill_key,
+            target=_current_skill(record, raw_roll.skill_key),
+        )
+        if not _passed(roll):
+            raise InvalidRuleOperationError(
+                "indefinite insanity recovery requires a successful treatment roll"
+            )
+        conditions.discard("indefinite_insanity")
+    else:
+        raise InvalidRuleOperationError("recovery requires temporary or indefinite insanity")
+    record.conditions = sorted(conditions)
+    operation = _add_operation(
+        session,
+        campaign_id=campaign_id,
+        operation_type="insanity_transition",
+        subject_id=record.id,
+        case_session_id=payload.case_session_id,
+        session_key=payload.session_key,
+        input_data=payload.model_dump(mode="json"),
+        output_data={"transition": payload.transition, "evidence": payload.evidence},
+        citations=(SANITY_CITATION,),
+    )
+    session.flush()
+    service._audit(
+        session,
+        campaign_id=record.campaign_id,
+        action="insanity_transition",
+        entity_type="investigator",
+        entity_id=record.id,
+        expected_version=payload.expected_version,
+        before=before,
+        after=service._investigator_response(record).model_dump(mode="json"),
+    )
+    response = _operation_response(operation, record)
+    session.commit()
+    return response
+
+
 def resolve_combat(
     session: Session, campaign_id: UUID, payload: CombatRequest
 ) -> EngineOperationResponse:
@@ -469,6 +685,8 @@ def resolve_combat(
     attacker = session.scalar(service._investigator_query(campaign_id, payload.attacker_id))
     if attacker is None:
         raise service.EntityNotFoundError("investigator not found")
+    if "dead" in attacker.conditions:
+        raise InvalidRuleOperationError("a dead investigator cannot participate in combat")
     maximum_damage = weapon.maximum_rolled_damage
     if weapon.uses_damage_bonus:
         maximum_damage += _damage_bonus_max(attacker.damage_bonus)
@@ -496,6 +714,8 @@ def resolve_combat(
     target, before = _claim_investigator(
         session, campaign_id, payload.target_id, payload.target_expected_version
     )
+    if "dead" in target.conditions:
+        raise InvalidRuleOperationError("a dead investigator cannot participate in combat")
     damage = payload.rolled_damage if hit else 0
     maximum_hit_points = (target.constitution + target.size) // 10
     target.hit_points, conditions = injury_state(
@@ -556,8 +776,7 @@ def _chase_response(record: ChaseRecord) -> ChaseResponse:
         track_length=record.track_length,
         version=record.version,
         citations=tuple(
-            EngineCitationResponse.model_validate(item.as_dict())
-            for item in CHASE_CITATIONS
+            EngineCitationResponse.model_validate(item.as_dict()) for item in CHASE_CITATIONS
         ),
         citation=EngineCitationResponse.model_validate(CHASE_CITATIONS[0].as_dict()),
         created_at=record.created_at,
@@ -685,9 +904,13 @@ def advance_chase(
             raise InvalidRuleOperationError("chase participant does not belong to campaign")
         current_target = _current_skill(investigator, cast(str, action.skill_key))
         roll = _roll_for(
-            session, roll_id=cast(UUID, action.roll_id), campaign_id=campaign_id,
-            investigator_id=action.investigator_id, case_session_id=UUID(record.case_session_id),
-            skill_key=action.skill_key, target=current_target,
+            session,
+            roll_id=cast(UUID, action.roll_id),
+            campaign_id=campaign_id,
+            investigator_id=action.investigator_id,
+            case_session_id=UUID(record.case_session_id),
+            skill_key=action.skill_key,
+            target=current_target,
         )
         succeeded = _passed(roll)
     if succeeded:
@@ -790,6 +1013,7 @@ def list_operations(session: Session, campaign_id: UUID) -> list[RuleOperationLo
         .order_by(RuleOperationRecord.created_at, RuleOperationRecord.id)
         .limit(500)
     ).all()
+
     def response_for(record: RuleOperationRecord) -> RuleOperationLogResponse:
         citations = _citation_items(record.citation_data)
         return RuleOperationLogResponse(

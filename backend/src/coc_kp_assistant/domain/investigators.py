@@ -10,6 +10,9 @@ class InvestigatorCondition(StrEnum):
     MAJOR_WOUND = "major_wound"
     UNCONSCIOUS = "unconscious"
     DYING = "dying"
+    STABILIZED = "stabilized"
+    DEAD = "dead"
+    BOUT_OF_MADNESS = "bout_of_madness"
     TEMPORARY_INSANITY = "temporary_insanity"
     INDEFINITE_INSANITY = "indefinite_insanity"
 

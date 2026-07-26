@@ -87,6 +87,9 @@ export type InvestigatorCondition =
   | "major_wound"
   | "unconscious"
   | "dying"
+  | "stabilized"
+  | "dead"
+  | "bout_of_madness"
   | "temporary_insanity"
   | "indefinite_insanity";
 

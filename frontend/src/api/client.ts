@@ -254,6 +254,7 @@ export function applyRecovery(
     injury_id: string;
     healing_roll?: number;
     medicine_roll_id?: string;
+    first_aid_roll_id?: string;
     constitution_roll_id?: string;
     period_key?: string;
     session_key?: string;
@@ -264,6 +265,14 @@ export function applyRecovery(
     `/campaigns/${campaignId}/investigators/${investigatorId}/recovery`,
     { method: "POST", body: JSON.stringify(payload) },
   ).then(normalizeEngineOperation);
+}
+
+export function applyDyingCheck(campaignId: string, investigatorId: string, payload: { expected_version: number; constitution_roll_id: string; period_key: string; session_key?: string; case_session_id: string }): Promise<EngineOperation> {
+  return request<EngineOperationWire>(`/campaigns/${campaignId}/investigators/${investigatorId}/dying-check`, { method: "POST", body: JSON.stringify(payload) }).then(normalizeEngineOperation);
+}
+
+export function applyInsanityTransition(campaignId: string, investigatorId: string, payload: { expected_version: number; transition: "bout_started" | "bout_ended" | "recovered"; period_key?: string; evidence?: string; treatment_roll_id?: string; session_key?: string; case_session_id: string }): Promise<EngineOperation> {
+  return request<EngineOperationWire>(`/campaigns/${campaignId}/investigators/${investigatorId}/insanity-transition`, { method: "POST", body: JSON.stringify(payload) }).then(normalizeEngineOperation);
 }
 
 export function listRuleOperations(

@@ -56,6 +56,9 @@ const CONDITION_LABELS: Record<InvestigatorCondition, string> = {
   major_wound: "重伤",
   unconscious: "昏迷",
   dying: "濒死",
+  stabilized: "已稳定",
+  dead: "死亡",
+  bout_of_madness: "疯狂发作",
   temporary_insanity: "临时疯狂",
   indefinite_insanity: "不定性疯狂",
 };
@@ -1051,4 +1054,3 @@ function RollResultCard({ result }: { result: RollResult }): ReactElement {
     </section>
   );
 }
-
