@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from coc_kp_assistant.api.schemas import (
     ChaseAdvanceRequest,
     ChaseCreateRequest,
-    ChaseParticipant,
+    ChaseParticipantState,
     ChaseResponse,
     CombatRequest,
     EngineCitationResponse,
@@ -493,14 +493,21 @@ def resolve_combat(
 
 
 def _chase_response(record: ChaseRecord) -> ChaseResponse:
+    if record.case_session_id is None:
+        raise InvalidRuleOperationError("chase is missing its required case session")
     return ChaseResponse(
         chase_id=UUID(record.id),
         campaign_id=UUID(record.campaign_id),
         title=record.title,
-        case_session_id=UUID(record.case_session_id) if record.case_session_id else None,
+        case_session_id=UUID(record.case_session_id),
         session_key=record.session_key,
         status=record.status,
-        participants=tuple(ChaseParticipant.model_validate(item) for item in record.participants),
+        participants=tuple(
+            ChaseParticipantState.model_validate(item) for item in record.participants
+        ),
+        round=record.round,
+        escape_distance=record.escape_distance,
+        track_length=record.track_length,
         version=record.version,
         citation=EngineCitationResponse.model_validate(CHASE_CITATION.as_dict()),
         created_at=record.created_at,
@@ -509,30 +516,48 @@ def _chase_response(record: ChaseRecord) -> ChaseResponse:
 
 
 def create_chase(session: Session, campaign_id: UUID, payload: ChaseCreateRequest) -> ChaseResponse:
-    _validate_case_session(session, campaign_id, payload.case_session_id)
+    _required_case_session(session, campaign_id, payload.case_session_id)
     if (
         session.scalar(select(CampaignRecord.id).where(CampaignRecord.id == str(campaign_id)))
         is None
     ):
         raise service.EntityNotFoundError("campaign not found")
     requested_ids = {str(item.investigator_id) for item in payload.participants}
-    found_ids = set(
-        session.scalars(
-            select(InvestigatorRecord.id).where(
+    investigators = {
+        record.id: record
+        for record in session.scalars(
+            select(InvestigatorRecord).where(
                 InvestigatorRecord.campaign_id == str(campaign_id),
                 InvestigatorRecord.id.in_(requested_ids),
             )
         ).all()
-    )
-    if found_ids != requested_ids:
+    }
+    if set(investigators) != requested_ids:
         raise InvalidRuleOperationError("chase participant does not belong to campaign")
+    # Read MOV only from the stored investigator record; it is never client input.
+    move_rates = {
+        investigator_id: int(investigators[investigator_id].move_rate)
+        for investigator_id in requested_ids
+    }
+    slowest = min(move_rates.values())
+    participants = [
+        {
+            **item.model_dump(mode="json"),
+            "move_rate": move_rates[str(item.investigator_id)],
+            "actions_remaining": 1 + max(0, move_rates[str(item.investigator_id)] - slowest),
+        }
+        for item in payload.participants
+    ]
     record = ChaseRecord(
         campaign_id=str(campaign_id),
         title=payload.title,
-        case_session_id=(str(payload.case_session_id) if payload.case_session_id else None),
+        case_session_id=str(payload.case_session_id),
         session_key=payload.session_key,
         status="active",
-        participants=[item.model_dump(mode="json") for item in payload.participants],
+        participants=participants,
+        round=1,
+        escape_distance=payload.escape_distance,
+        track_length=payload.track_length,
     )
     session.add(record)
     session.flush()
@@ -545,7 +570,7 @@ def create_chase(session: Session, campaign_id: UUID, payload: ChaseCreateReques
         case_session_id=payload.case_session_id,
         session_key=payload.session_key,
         input_data=payload.model_dump(mode="json"),
-        output_data={"version": record.version, "participants": record.participants},
+        output_data={"version": record.version, "participants": record.participants, "round": 1},
         citation=CHASE_CITATION.as_dict(),
     )
     service._audit(
@@ -588,14 +613,49 @@ def advance_chase(
     )
     if record is None:
         raise service.EntityNotFoundError("chase not found")
+    if record.version != payload.expected_version:
+        raise service.VersionConflictError("chase version conflict")
+    if record.status != "active":
+        raise InvalidRuleOperationError("cannot act after chase is complete")
     before = _chase_response(record)
-    move_by_id = {str(move.investigator_id): move.move_units for move in payload.moves}
+    action = payload.action
     participants = [dict(item) for item in record.participants]
-    participant_ids = {str(item["investigator_id"]) for item in participants}
-    if not set(move_by_id) <= participant_ids:
-        raise InvalidRuleOperationError("move references a non-participant")
-    for item in participants:
-        item["position"] = int(item["position"]) + move_by_id.get(str(item["investigator_id"]), 0)
+    participant = next(
+        (item for item in participants if item["investigator_id"] == str(action.investigator_id)),
+        None,
+    )
+    if participant is None:
+        raise InvalidRuleOperationError("action references a non-participant")
+    if int(participant["actions_remaining"]) <= 0:
+        raise InvalidRuleOperationError("participant has no actions remaining this round")
+    succeeded = True
+    if action.action == "hazard":
+        investigator = session.get(InvestigatorRecord, str(action.investigator_id))
+        if investigator is None or investigator.campaign_id != str(campaign_id):
+            raise InvalidRuleOperationError("chase participant does not belong to campaign")
+        current_target = _current_skill(investigator, cast(str, action.skill_key))
+        roll = _roll_for(
+            session, roll_id=cast(UUID, action.roll_id), campaign_id=campaign_id,
+            investigator_id=action.investigator_id, case_session_id=UUID(record.case_session_id),
+            skill_key=action.skill_key, target=current_target,
+        )
+        succeeded = _passed(roll)
+    if succeeded:
+        participant["position"] = min(int(participant["position"]) + 1, record.track_length)
+    participant["actions_remaining"] = int(participant["actions_remaining"]) - 1
+    pursuers = [int(item["position"]) for item in participants if item["role"] == "pursuer"]
+    fleeing = [int(item["position"]) for item in participants if item["role"] == "fleeing"]
+    status = "active"
+    if pursuers and fleeing and max(pursuers) >= min(fleeing):
+        status = "caught"
+    elif fleeing and max(fleeing) >= record.escape_distance:
+        status = "escaped"
+    next_round = record.round
+    if status == "active" and all(int(item["actions_remaining"]) == 0 for item in participants):
+        slowest = min(int(item["move_rate"]) for item in participants)
+        for item in participants:
+            item["actions_remaining"] = 1 + max(0, int(item["move_rate"]) - slowest)
+        next_round += 1
     result = cast(
         CursorResult[Any],
         session.execute(
@@ -607,6 +667,8 @@ def advance_chase(
             )
             .values(
                 participants=participants,
+                status=status,
+                round=next_round,
                 version=payload.expected_version + 1,
             )
         ),
@@ -622,10 +684,16 @@ def advance_chase(
         campaign_id=campaign_id,
         operation_type="chase_advanced",
         subject_id=record.id,
-        case_session_id=(UUID(record.case_session_id) if record.case_session_id else None),
+        case_session_id=UUID(record.case_session_id),
         session_key=record.session_key,
         input_data=payload.model_dump(mode="json"),
-        output_data={"version": record.version, "participants": participants},
+        output_data={
+            "version": record.version,
+            "participants": participants,
+            "round": record.round,
+            "status": record.status,
+            "succeeded": succeeded,
+        },
         citation=CHASE_CITATION.as_dict(),
     )
     service._audit(

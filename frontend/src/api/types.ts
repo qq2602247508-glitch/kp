@@ -271,6 +271,8 @@ export type ChaseParticipant = {
   investigator_id: string;
   role: "pursuer" | "fleeing";
   position: number;
+  move_rate: number;
+  actions_remaining: number;
 };
 
 export type Chase = {
@@ -281,6 +283,9 @@ export type Chase = {
   session_key: string | null;
   status: string;
   participants: ChaseParticipant[];
+  round: number;
+  escape_distance: number;
+  track_length: number;
   version: number;
   citation: EngineCitation;
   created_at: string;

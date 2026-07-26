@@ -311,8 +311,10 @@ export function createChase(
   payload: {
     title: string;
     session_key?: string;
-    case_session_id?: string;
-    participants: ChaseParticipant[];
+    case_session_id: string;
+    participants: Pick<ChaseParticipant, "investigator_id" | "role" | "position">[];
+    escape_distance?: number;
+    track_length?: number;
   },
 ): Promise<Chase> {
   return request<Chase>(`/campaigns/${campaignId}/chases`, {
@@ -326,7 +328,7 @@ export function advanceChase(
   chaseId: string,
   payload: {
     expected_version: number;
-    moves: { investigator_id: string; move_units: number }[];
+    action: { investigator_id: string; action: "move" | "hazard"; roll_id?: string; skill_key?: string };
   },
 ): Promise<Chase> {
   return request<Chase>(

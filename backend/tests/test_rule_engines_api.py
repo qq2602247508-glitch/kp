@@ -290,7 +290,7 @@ def test_rule_engines_reject_forged_rolls_replays_and_zero_injuries(client) -> N
     assert client.post(combat_url, json=valid_combat).status_code == 422
 
 
-def test_chase_state_uses_optimistic_lock_and_logs_cited_advances(client) -> None:
+def test_chase_uses_stored_mov_actions_roll_binding_and_completion(client) -> None:
     campaign_id, first, second = setup_pair(client)
     case_session = client.post(
         f"/api/v1/campaigns/{campaign_id}/case-state/sessions",
@@ -316,43 +316,128 @@ def test_chase_state_uses_optimistic_lock_and_logs_cited_advances(client) -> Non
                 {
                     "investigator_id": second["investigator_id"],
                     "role": "fleeing",
-                    "position": 2,
+                    "position": 1,
                 },
             ],
+            "escape_distance": 2,
+            "track_length": 5,
         },
     )
     assert created.status_code == 201, created.text
     chase = created.json()
     assert chase["version"] == 1
     assert chase["case_session_id"] == case_session.json()["entity_id"]
+    assert chase["round"] == 1
+    assert all(
+        entry["move_rate"] == 8 and entry["actions_remaining"] == 1
+        for entry in chase["participants"]
+    )
     assert_cited(chase)
 
     advanced = client.post(
         f"/api/v1/campaigns/{campaign_id}/chases/{chase['chase_id']}/advance",
         json={
             "expected_version": chase["version"],
-            "moves": [
-                {"investigator_id": first["investigator_id"], "move_units": 1},
-                {"investigator_id": second["investigator_id"], "move_units": 1},
-            ],
+            "action": {"investigator_id": first["investigator_id"], "action": "move"},
         },
     )
     assert advanced.status_code == 200, advanced.text
     result = advanced.json()
     assert result["version"] == 2
+    assert result["round"] == 1
     positions = {entry["investigator_id"]: entry["position"] for entry in result["participants"]}
     assert positions[first["investigator_id"]] == 1
-    assert positions[second["investigator_id"]] == 3
+    assert positions[second["investigator_id"]] == 1
+    assert result["status"] == "caught"
     assert_cited(result)
 
     stale = client.post(
         f"/api/v1/campaigns/{campaign_id}/chases/{chase['chase_id']}/advance",
         json={
             "expected_version": 1,
-            "moves": [{"investigator_id": first["investigator_id"], "move_units": 1}],
+            "action": {"investigator_id": first["investigator_id"], "action": "move"},
         },
     )
     assert stale.status_code == 409
 
+    completed = client.post(
+        f"/api/v1/campaigns/{campaign_id}/chases/{chase['chase_id']}/advance",
+        json={
+            "expected_version": result["version"],
+            "action": {"investigator_id": second["investigator_id"], "action": "move"},
+        },
+    )
+    assert completed.status_code == 422
+    assert (
+        client.post(
+            f"/api/v1/campaigns/{campaign_id}/chases/{chase['chase_id']}/advance",
+            json={
+                "expected_version": result["version"],
+                "action": {"investigator_id": second["investigator_id"], "action": "move"},
+            },
+        ).status_code
+        == 422
+    )
+
     tables = set(inspect(client.app.state.engine).get_table_names())
     assert {"rule_operation_logs", "chases"} <= tables
+
+
+def test_chase_hazard_roll_is_bound_and_escape_completes(client) -> None:
+    campaign_id, first, second = setup_pair(client)
+    case_session_id = create_case_session(client, campaign_id)
+    created = client.post(
+        f"/api/v1/campaigns/{campaign_id}/chases",
+        json={
+            "title": "巷战",
+            "case_session_id": case_session_id,
+            "escape_distance": 1,
+            "participants": [
+                {"investigator_id": first["investigator_id"], "role": "pursuer", "position": 0},
+                {"investigator_id": second["investigator_id"], "role": "fleeing", "position": 0},
+            ],
+        },
+    )
+    assert created.status_code == 201
+    chase = created.json()
+    chase_url = f"/api/v1/campaigns/{campaign_id}/chases/{chase['chase_id']}/advance"
+    forged = client.post(
+        chase_url,
+        json={
+            "expected_version": 1,
+            "action": {
+                "investigator_id": second["investigator_id"],
+                "action": "hazard",
+                "roll_id": "00000000-0000-0000-0000-000000000000",
+                "skill_key": "fighting_brawl",
+            },
+        },
+    )
+    assert forged.status_code == 422
+    roll = client.post(
+        "/api/v1/rolls",
+        json={
+            "campaign_id": campaign_id,
+            "case_session_id": case_session_id,
+            "investigator_id": second["investigator_id"],
+            "skill_key": "fighting_brawl",
+            "label": "斗殴",
+            "target": 55,
+            "dice": {"units_digit": 1, "tens_digits": [1]},
+        },
+    )
+    assert roll.status_code == 201
+    escaped = client.post(
+        chase_url,
+        json={
+            "expected_version": 1,
+            "action": {
+                "investigator_id": second["investigator_id"],
+                "action": "hazard",
+                "roll_id": roll.json()["roll_id"],
+                "skill_key": "fighting_brawl",
+            },
+        },
+    )
+    assert escaped.status_code == 200, escaped.text
+    assert escaped.json()["status"] == "escaped"

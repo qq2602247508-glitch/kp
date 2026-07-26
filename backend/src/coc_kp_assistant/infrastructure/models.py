@@ -296,6 +296,9 @@ class ChaseRecord(Base):
     ruleset: Mapped[str] = mapped_column(String(20), nullable=False, default="coc7e")
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
     participants: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    round: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    escape_distance: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    track_length: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

@@ -41,6 +41,14 @@ export function CombatChasePage(): ReactElement {
   const [weaponKey, setWeaponKey] = useState("unarmed");
   const [damage, setDamage] = useState(1);
   const [chases, setChases] = useState<Chase[]>([]);
+  const [chaseId, setChaseId] = useState("");
+  const [pursuerPosition, setPursuerPosition] = useState(0);
+  const [fleeingPosition, setFleeingPosition] = useState(2);
+  const [escapeDistance, setEscapeDistance] = useState(10);
+  const [trackLength, setTrackLength] = useState(10);
+  const [actingParticipantId, setActingParticipantId] = useState("");
+  const [chaseAction, setChaseAction] = useState<"move" | "hazard">("move");
+  const [hazardSkillKey, setHazardSkillKey] = useState("fighting_brawl");
   const [logs, setLogs] = useState<RuleOperationLog[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -54,7 +62,7 @@ export function CombatChasePage(): ReactElement {
     () => investigators.find((item) => item.investigator_id === targetId),
     [targetId, investigators],
   );
-  const activeChase = chases[0];
+  const activeChase = chases.find((item) => item.chase_id === chaseId) ?? chases[0];
 
   useEffect(() => {
     const controller = new AbortController();
@@ -91,6 +99,7 @@ export function CombatChasePage(): ReactElement {
         setAttackerId((current) => people.some((item) => item.investigator_id === current) ? current : people[0]?.investigator_id || "");
         setTargetId((current) => people.some((item) => item.investigator_id === current) ? current : people[1]?.investigator_id || "");
         setChases(chaseItems);
+        setChaseId((current) => chaseItems.some((item) => item.chase_id === current) ? current : chaseItems[0]?.chase_id || "");
         setLogs(operationItems);
         setSessions(sessionEntries);
         setCaseSessionId((current) => sessionEntries.some((item) => item.entity_id === current) ? current : sessionEntries[0]?.entity_id || "");
@@ -168,9 +177,15 @@ export function CombatChasePage(): ReactElement {
     setTargetId("");
     setCaseSessionId("");
     setChases([]);
+    setChaseId("");
+    setActingParticipantId("");
   }
 
   async function handleCreateChase(): Promise<void> {
+    if (!caseSessionId) {
+      setFailure("建立追逐必须选择案件场次。");
+      return;
+    }
     if (!attacker || !target || attacker.investigator_id === target.investigator_id) {
       setFailure("建立追逐需要两名不同的参与者。");
       return;
@@ -179,13 +194,17 @@ export function CombatChasePage(): ReactElement {
     try {
       const chase = await createChase(campaignId, {
         title: "现场追逐",
-        case_session_id: caseSessionId || undefined,
+        case_session_id: caseSessionId,
         participants: [
-          { investigator_id: attacker.investigator_id, role: "pursuer", position: 0 },
-          { investigator_id: target.investigator_id, role: "fleeing", position: 2 },
+          { investigator_id: attacker.investigator_id, role: "pursuer", position: pursuerPosition },
+          { investigator_id: target.investigator_id, role: "fleeing", position: fleeingPosition },
         ],
+        escape_distance: escapeDistance,
+        track_length: trackLength,
       });
       setChases((items) => [chase, ...items]);
+      setChaseId(chase.chase_id);
+      setActingParticipantId(chase.participants[0]?.investigator_id || "");
       setLogs(await listRuleOperations(campaignId));
       setNotice("追逐已建立。");
       setFailure(null);
@@ -197,21 +216,26 @@ export function CombatChasePage(): ReactElement {
   }
 
   async function handleAdvance(): Promise<void> {
-    if (!activeChase) return;
+    if (!activeChase || !actingParticipantId || activeChase.status !== "active") return;
     setBusy(true);
     try {
+      let rollId: string | undefined;
+      if (chaseAction === "hazard") {
+        const actor = investigators.find((item) => item.investigator_id === actingParticipantId);
+        const targetValue = actor?.profile.skills.find((skill) => skill.skill_key === hazardSkillKey)?.current_value;
+        if (!actor || targetValue === undefined) throw new Error("行动者没有所选障碍技能。");
+        const roll = await resolveRoll({ campaign_id: campaignId, case_session_id: activeChase.case_session_id ?? undefined, investigator_id: actingParticipantId, skill_key: hazardSkillKey, label: "追逐障碍", target: targetValue, difficulty: "regular", bonus_penalty: 0 });
+        rollId = roll.roll_id;
+      }
       const chase = await advanceChase(campaignId, activeChase.chase_id, {
         expected_version: activeChase.version,
-        moves: activeChase.participants.map((participant) => ({
-          investigator_id: participant.investigator_id,
-          move_units: 1,
-        })),
+        action: { investigator_id: actingParticipantId, action: chaseAction, roll_id: rollId, skill_key: chaseAction === "hazard" ? hazardSkillKey : undefined },
       });
       setChases((items) =>
         items.map((item) => (item.chase_id === chase.chase_id ? chase : item)),
       );
       setLogs(await listRuleOperations(campaignId));
-      setNotice("追逐推进了一轮。");
+      setNotice("已记录一项追逐行动。");
       setFailure(null);
     } catch (error) {
       setFailure(errorMessage(error));
@@ -304,30 +328,36 @@ export function CombatChasePage(): ReactElement {
 
         <article className="engine-panel">
           <h3>追逐</h3>
+          <div className="engine-form-grid">
+            <label className="field"><span>追者起点</span><input type="number" min="0" value={pursuerPosition} onChange={(event) => setPursuerPosition(Number(event.target.value))} /></label>
+            <label className="field"><span>逃者起点</span><input type="number" min="0" value={fleeingPosition} onChange={(event) => setFleeingPosition(Number(event.target.value))} /></label>
+            <label className="field"><span>逃脱距离</span><input type="number" min="1" value={escapeDistance} onChange={(event) => setEscapeDistance(Number(event.target.value))} /></label>
+            <label className="field"><span>赛道长度</span><input type="number" min="1" value={trackLength} onChange={(event) => setTrackLength(Number(event.target.value))} /></label>
+          </div>
           <div className="engine-actions">
-            <button disabled={busy || investigators.length < 2} onClick={() => void handleCreateChase()} type="button">
+            <button disabled={busy || investigators.length < 2 || !caseSessionId} onClick={() => void handleCreateChase()} type="button">
               建立追逐
-            </button>
-            <button
-              className="secondary-button"
-              disabled={busy || !activeChase}
-              onClick={() => void handleAdvance()}
-              type="button"
-            >
-              推进一轮
             </button>
           </div>
           {activeChase ? (
             <div className="chase-track">
+              <label className="field"><span>选择追逐</span><select value={activeChase.chase_id} onChange={(event) => setChaseId(event.target.value)}>{chases.map((item) => <option key={item.chase_id} value={item.chase_id}>{item.title}</option>)}</select></label>
               <strong>{activeChase.title}</strong>
+              <span>第 {activeChase.round} 轮 · {activeChase.status} · 逃脱距离 {activeChase.escape_distance}</span>
               {activeChase.participants.map((participant) => (
                 <span key={participant.investigator_id}>
                   {investigators.find(
                     (item) => item.investigator_id === participant.investigator_id,
                   )?.profile.name ?? participant.investigator_id}
-                  ：位置 {participant.position}（{participant.role}）
+                  ：位置 {participant.position}（{participant.role} · MOV {participant.move_rate} · AP {participant.actions_remaining}）
                 </span>
               ))}
+              {activeChase.status === "active" ? <div className="engine-form-grid">
+                <label className="field"><span>行动者</span><select value={actingParticipantId} onChange={(event) => setActingParticipantId(event.target.value)}>{activeChase.participants.map((item) => <option key={item.investigator_id} value={item.investigator_id}>{investigators.find((person) => person.investigator_id === item.investigator_id)?.profile.name ?? item.investigator_id}</option>)}</select></label>
+                <label className="field"><span>行动</span><select value={chaseAction} onChange={(event) => setChaseAction(event.target.value as "move" | "hazard")}><option value="move">移动</option><option value="hazard">障碍检定</option></select></label>
+                {chaseAction === "hazard" ? <label className="field"><span>障碍技能</span><input value={hazardSkillKey} onChange={(event) => setHazardSkillKey(event.target.value)} /></label> : null}
+                <button className="secondary-button" disabled={busy || !actingParticipantId} onClick={() => void handleAdvance()} type="button">执行一项行动</button>
+              </div> : null}
               <small>
                 {activeChase.citation.filename} · 第 {activeChase.citation.page} 页 ·{" "}
                 {activeChase.citation.section}

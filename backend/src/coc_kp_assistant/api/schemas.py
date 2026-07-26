@@ -262,45 +262,58 @@ class ChaseParticipant(DomainModel):
     position: int = Field(default=0, ge=0, le=10000)
 
 
+class ChaseParticipantState(ChaseParticipant):
+    move_rate: int = Field(ge=1, le=20)
+    actions_remaining: int = Field(ge=0, le=20)
+
+
 class ChaseCreateRequest(DomainModel):
     title: str = Field(min_length=1, max_length=200)
     session_key: str | None = Field(default=None, max_length=120)
-    case_session_id: UUID | None = None
+    case_session_id: UUID
     participants: tuple[ChaseParticipant, ...] = Field(min_length=2, max_length=20)
+    escape_distance: int = Field(default=10, ge=1, le=10000)
+    track_length: int = Field(default=10, ge=1, le=10000)
 
     @model_validator(mode="after")
     def unique_participants(self) -> "ChaseCreateRequest":
         ids = [item.investigator_id for item in self.participants]
         if len(ids) != len(set(ids)):
             raise ValueError("chase participants must be unique")
+        if self.escape_distance > self.track_length:
+            raise ValueError("escape distance must not exceed track length")
         return self
 
 
-class ChaseMove(DomainModel):
+class ChaseAction(DomainModel):
     investigator_id: UUID
-    move_units: int = Field(ge=0, le=1)
+    action: str = Field(pattern=r"^(move|hazard)$")
+    roll_id: UUID | None = None
+    skill_key: str | None = Field(default=None, min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def hazard_requires_roll(self) -> "ChaseAction":
+        if self.action == "hazard" and (self.roll_id is None or self.skill_key is None):
+            raise ValueError("hazard action requires roll_id and skill_key")
+        return self
 
 
 class ChaseAdvanceRequest(DomainModel):
     expected_version: int = Field(ge=1)
-    moves: tuple[ChaseMove, ...] = Field(min_length=1, max_length=20)
-
-    @model_validator(mode="after")
-    def unique_moves(self) -> "ChaseAdvanceRequest":
-        ids = [item.investigator_id for item in self.moves]
-        if len(ids) != len(set(ids)):
-            raise ValueError("each participant may move once per advance")
-        return self
+    action: ChaseAction
 
 
 class ChaseResponse(DomainModel):
     chase_id: UUID
     campaign_id: UUID
     title: str
-    case_session_id: UUID | None
+    case_session_id: UUID
     session_key: str | None
     status: str
-    participants: tuple[ChaseParticipant, ...]
+    participants: tuple[ChaseParticipantState, ...]
+    round: int
+    escape_distance: int
+    track_length: int
     version: int
     citation: EngineCitationResponse
     created_at: datetime
