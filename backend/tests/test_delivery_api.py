@@ -208,11 +208,128 @@ def test_export_import_is_namespaced_atomic_and_non_overwriting(tmp_path: Path) 
             assert invalid_reference.get("/api/v1/campaigns").json() == []
 
 
+def test_all_case_kinds_round_trip_custom_domain_statuses(tmp_path: Path) -> None:
+    with _client(tmp_path / "source") as source, _client(tmp_path / "target") as target:
+        campaign = _campaign(source)
+        campaign_id = str(campaign["campaign_id"])
+        long_domain_item = "守秘人自定义规则" * 251
+        replaced = source.put(
+            f"/api/v1/campaigns/{campaign_id}",
+            json={
+                "title": campaign["title"],
+                "ruleset": "coc7e",
+                "era": "1920s",
+                "enabled_source_pack_ids": campaign["enabled_source_pack_ids"],
+                "house_rules": [long_domain_item],
+                "expected_version": campaign["version"],
+            },
+        )
+        assert replaced.status_code == 200, replaced.text
+        investigator = source.post(
+            f"/api/v1/campaigns/{campaign_id}/investigators",
+            json={
+                "name": "长记忆调查员",
+                "occupation": "古文书研究者",
+                "age": 36,
+                "era": "1920s",
+                "characteristics": {
+                    "strength": 50,
+                    "constitution": 60,
+                    "size": 50,
+                    "dexterity": 55,
+                    "appearance": 45,
+                    "intelligence": 70,
+                    "power": 60,
+                    "education": 80,
+                },
+                "luck": 50,
+                "move_rate": 8,
+                "backstory": {"traits": [long_domain_item]},
+            },
+        )
+        assert investigator.status_code == 201, investigator.text
+
+        def create(kind: str, status: str, **fields: object) -> dict[str, object]:
+            response = source.post(
+                f"/api/v1/campaigns/{campaign_id}/case-state/{kind}",
+                json={"title": f"{kind} custom", "status": status, **fields},
+            )
+            assert response.status_code == 201, response.text
+            return response.json()
+
+        session = create("sessions", "haunted-session")
+        person = create("people", "suspected-witness")
+        location = create("locations", "fog-bound")
+        scene = create(
+            "scenes",
+            "ritual-in-progress",
+            session_id=session["entity_id"],
+            location_id=location["entity_id"],
+        )
+        first_clue = create(
+            "clues",
+            "partly-deciphered",
+            scene_id=scene["entity_id"],
+            person_id=person["entity_id"],
+            location_id=location["entity_id"],
+        )
+        second_clue = create("clues", "salt-stained")
+        create(
+            "relationships",
+            "tentative-link",
+            source_clue_id=first_clue["entity_id"],
+            target_clue_id=second_clue["entity_id"],
+            relationship_type="echoes",
+        )
+        create(
+            "handouts",
+            "awaiting-translation",
+            clue_id=first_clue["entity_id"],
+        )
+        create(
+            "timeline-events",
+            "foretold",
+            session_id=session["entity_id"],
+            scene_id=scene["entity_id"],
+        )
+
+        bundle = source.get(f"/api/v1/campaigns/{campaign_id}/export").json()
+        imported = target.post("/api/v1/imports/campaign", json=bundle)
+        assert imported.status_code == 201, imported.text
+        imported_campaign = target.get(f"/api/v1/campaigns/{campaign_id}").json()
+        assert imported_campaign["house_rules"] == [long_domain_item]
+        imported_investigators = target.get(
+            f"/api/v1/campaigns/{campaign_id}/investigators"
+        ).json()
+        assert imported_investigators[0]["backstory"]["traits"] == [long_domain_item]
+        expected = {
+            "sessions": {"haunted-session"},
+            "people": {"suspected-witness"},
+            "locations": {"fog-bound"},
+            "scenes": {"ritual-in-progress"},
+            "clues": {"partly-deciphered", "salt-stained"},
+            "relationships": {"tentative-link"},
+            "handouts": {"awaiting-translation"},
+            "timeline-events": {"foretold"},
+        }
+        for kind, statuses in expected.items():
+            listed = target.get(
+                f"/api/v1/campaigns/{campaign_id}/case-state/{kind}"
+            )
+            assert listed.status_code == 200
+            assert {item["status"] for item in listed.json()} == statuses
+
+
 def test_import_rejects_domain_and_schema_corruption_before_any_write(
     tmp_path: Path,
 ) -> None:
     with _client(tmp_path / "source") as source:
         campaign = _campaign(source)
+        scene = source.post(
+            f"/api/v1/campaigns/{campaign['campaign_id']}/case-state/scenes",
+            json={"title": "边界场景", "status": "haunted"},
+        )
+        assert scene.status_code == 201
         bundle = source.get(f"/api/v1/campaigns/{campaign['campaign_id']}/export").json()
 
     corruptions = []
@@ -233,6 +350,9 @@ def test_import_rejects_domain_and_schema_corruption_before_any_write(
     corruptions.append(malformed)
     malformed = deepcopy(bundle)
     del malformed["tables"]["campaigns"][0]["updated_at"]
+    corruptions.append(malformed)
+    malformed = deepcopy(bundle)
+    malformed["tables"]["case_scenes"][0]["player_visible_text"] = "x" * 20_001
     corruptions.append(malformed)
     malformed = deepcopy(bundle)
     assert malformed["tables"]["state_audits"]

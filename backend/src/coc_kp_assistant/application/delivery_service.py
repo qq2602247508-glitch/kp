@@ -32,6 +32,7 @@ from coc_kp_assistant.api.schemas import ChaseParticipantState
 from coc_kp_assistant.config import Settings
 from coc_kp_assistant.domain import SourcePackManifest
 from coc_kp_assistant.domain.campaigns import CampaignCreate, CampaignEra
+from coc_kp_assistant.domain.case_state import CaseEntityKind, CaseEntryCreate
 from coc_kp_assistant.domain.investigators import (
     CoreCharacteristics,
     InvestigatorBackstory,
@@ -52,6 +53,8 @@ from coc_kp_assistant.rag import (
     PRODUCT_NAMESPACE,
     RULESET_NAMESPACE,
 )
+
+from . import case_service
 
 EXPORT_SCHEMA_VERSION = 1
 COMPLETION_MODEL = "qwen3:30b-instruct"
@@ -493,11 +496,15 @@ def _validate_database_row(table_name: str, row: dict[str, Any]) -> None:
             _validate_json_value(value, label)
 
 
-def _require_string_list(value: Any, label: str, *, max_length: int = 2_000) -> list[str]:
+def _require_string_list(
+    value: Any, label: str, *, max_length: int | None = None
+) -> list[str]:
     if not isinstance(value, list) or any(
-        not isinstance(item, str) or len(item) > max_length for item in value
+        not isinstance(item, str)
+        or (max_length is not None and len(item) > max_length)
+        for item in value
     ):
-        raise DeliveryValidationError(f"{label} must be an array of bounded strings")
+        raise DeliveryValidationError(f"{label} must be an array of strings")
     return value
 
 
@@ -530,7 +537,7 @@ def _validate_import_semantics(
         "campaign.enabled_source_pack_ids",
         max_length=80,
     )
-    _require_string_list(campaign["house_rules"], "campaign.house_rules", max_length=2_000)
+    _require_string_list(campaign["house_rules"], "campaign.house_rules")
 
     catalog = _catalog_packs(settings)
     by_id = {item["pack_id"]: item for item in catalog}
@@ -567,13 +574,6 @@ def _validate_import_semantics(
         }
         skill_payloads = []
         for skill in skills_by_investigator.get(investigator["id"], []):
-            if (
-                skill["source_pack_id"] is not None
-                and skill["source_pack_id"] not in requested
-            ):
-                raise DeliveryValidationError(
-                    "investigator skill references a disabled source pack"
-                )
             skill_payloads.append(
                 {
                     "skill_key": skill["skill_key"],
@@ -637,31 +637,44 @@ def _validate_import_semantics(
                 "investigator contains invalid COC7 domain data"
             ) from error
 
-    case_tables = (
-        "case_sessions",
-        "case_people",
-        "case_locations",
-        "case_scenes",
-        "case_clues",
-        "case_relationships",
-        "case_handouts",
-        "case_timeline_events",
-    )
-    valid_case_statuses = {
-        "planned",
-        "active",
-        "inactive",
-        "draft",
-        "complete",
-        "completed",
-        "discovered",
-        "revealed",
-        "archived",
+    case_contracts: dict[str, tuple[CaseEntityKind, tuple[str, ...]]] = {
+        "case_sessions": (CaseEntityKind.SESSIONS, ("time_label",)),
+        "case_people": (CaseEntityKind.PEOPLE, ("role",)),
+        "case_locations": (CaseEntityKind.LOCATIONS, ()),
+        "case_scenes": (
+            CaseEntityKind.SCENES,
+            ("session_id", "location_id"),
+        ),
+        "case_clues": (
+            CaseEntityKind.CLUES,
+            ("scene_id", "person_id", "location_id", "discovered"),
+        ),
+        "case_relationships": (
+            CaseEntityKind.RELATIONSHIPS,
+            ("source_clue_id", "target_clue_id", "relationship_type"),
+        ),
+        "case_handouts": (CaseEntityKind.HANDOUTS, ("clue_id", "revealed")),
+        "case_timeline_events": (
+            CaseEntityKind.TIMELINE_EVENTS,
+            ("session_id", "scene_id", "time_label", "sort_order"),
+        ),
     }
-    for table_name in case_tables:
+    for table_name, (kind, kind_fields) in case_contracts.items():
         for row in validated[table_name]:
-            if not row["title"].strip() or row["status"] not in valid_case_statuses:
-                raise DeliveryValidationError(f"{table_name} contains invalid title/status")
+            payload_data = {
+                "title": row["title"],
+                "player_visible_text": row["player_visible_text"],
+                "keeper_truth": row["keeper_truth"],
+                "status": row["status"],
+                **{field: row[field] for field in kind_fields},
+            }
+            try:
+                payload = CaseEntryCreate.model_validate(payload_data)
+                case_service._validate_payload_shape(kind, payload)
+            except (ValidationError, case_service.InvalidCaseStateError) as error:
+                raise DeliveryValidationError(
+                    f"{table_name} contains invalid case domain data"
+                ) from error
             if row["version"] < 1:
                 raise DeliveryValidationError(f"{table_name}.version must be positive")
     for relationship in validated["case_relationships"]:
@@ -684,11 +697,6 @@ def _validate_import_semantics(
     for operation in validated["rule_operation_logs"]:
         if not operation["operation_type"].strip():
             raise DeliveryValidationError("rule operation type cannot be empty")
-        valid_operation_subjects = {item["id"] for item in validated["investigators"]} | {
-            item["id"] for item in validated["chases"]
-        }
-        if operation["subject_id"] not in valid_operation_subjects:
-            raise DeliveryValidationError("rule operation subject is outside the campaign")
         for field in ("input_data", "output_data", "citation_data"):
             if not isinstance(operation[field], dict):
                 raise DeliveryValidationError(f"rule operation {field} must be an object")
@@ -744,11 +752,7 @@ def _validate_import_semantics(
             or proposal["model_name"] != COMPLETION_MODEL
         ):
             raise DeliveryValidationError("AI proposal contains invalid state")
-        citation_ids = _require_string_list(
-            proposal["citation_ids"], "ai_proposals.citation_ids"
-        )
-        for citation_id in citation_ids:
-            _validate_uuid(citation_id, "ai_proposals.citation_ids")
+        _require_string_list(proposal["citation_ids"], "ai_proposals.citation_ids")
         if proposal["proposal_type"] == "case_state_create" and (
             proposal["target_entity_id"] is not None or proposal["target_version"] is not None
         ):
