@@ -133,6 +133,9 @@ describe("InvestigatorPage", () => {
     render(<InvestigatorPage />);
 
     await waitFor(() => expect(screen.getByLabelText("姓名")).toHaveValue("林若岚"));
+    expect(screen.getByRole("region", { name: "调查员摘要" })).toHaveTextContent("生命 HP");
+    expect(screen.getByRole("region", { name: "调查员摘要" })).toHaveTextContent("装备与资产");
+    expect(screen.getByTitle(/发现隐藏的门/)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("使用技能"), {
       target: { value: "spot_hidden" },
     });

@@ -88,6 +88,27 @@ const COMMON_SKILLS: SkillEntry[] = [
   skill("stealth", "潜行", 20),
 ];
 
+/** Short, COC7-native reminders shown on hover; the rule engine remains authoritative. */
+const SKILL_DESCRIPTIONS: Record<string, string> = {
+  accounting: "评估财务状况、追查账目或发现资金异常。通常进行 INT/5 或技能百分骰。",
+  anthropology: "理解人类文化、习俗与社会结构，辨认陌生群体的行为模式。",
+  archaeology: "识别古代遗迹、器物与文字，判断年代和用途。",
+  charm: "以魅力、礼貌或社交手段影响他人；抵抗时由 KP 设定对抗技能。",
+  climb: "攀登、抓握和安全下降；失败可能造成坠落或伤势。",
+  dodge: "躲避远程攻击、近战或环境危险；战斗中按 COC7 对抗规则处理。",
+  first_aid: "处理创伤并稳定伤者；每名伤者通常只能从急救中获益一次。",
+  history: "回忆历史人物、事件、地点和资料背景。",
+  intimidate: "以威胁或强势姿态迫使目标让步，也可用于对抗意志。",
+  library_use: "在档案、图书馆或数据库中高效检索线索。",
+  listen: "察觉细微声音、脚步、谈话或异常动静。",
+  medicine: "诊断疾病、处理复杂创伤并提供专业医疗。",
+  occult: "辨认神秘传统、仪式与传说；不等于自动理解克苏鲁神话。",
+  persuade: "用逻辑、谈判或真诚说服目标；效果取决于诉求与情境。",
+  psychology: "判断情绪、动机和心理状态，识别异常或不自然的行为。",
+  spot_hidden: "发现隐藏的门、物品、痕迹或环境异常。",
+  stealth: "无声移动、隐藏身形和避开注意；受环境与对方侦查影响。",
+};
+
 function skill(skillKey: string, displayName: string, baseValue: number): SkillEntry {
   return {
     skill_key: skillKey,
@@ -523,7 +544,9 @@ function InvestigatorSheet({
   }
 
   return (
-    <form className="investigator-sheet" onSubmit={(event) => event.preventDefault()}>
+    <>
+      <InvestigatorOverview editor={editor} />
+      <form className="investigator-sheet" onSubmit={(event) => event.preventDefault()}>
       <section className="sheet-section identity-section">
         <div className="section-title">
           <span>01</span>
@@ -735,7 +758,11 @@ function InvestigatorSheet({
         </div>
         <div className="skill-list">
           {profile.skills.map((entry, index) => (
-            <div className="skill-row" key={`${entry.skill_key}-${index}`}>
+            <div
+              className="skill-row"
+              key={`${entry.skill_key}-${index}`}
+              title={SKILL_DESCRIPTIONS[entry.skill_key] ?? "COC7 百分骰技能；由 KP 根据情境设定目标值与难度。"}
+            >
               <input
                 aria-label={`技能名称 ${index + 1}`}
                 onChange={(event) =>
@@ -852,7 +879,57 @@ function InvestigatorSheet({
           </Field>
         </div>
       </section>
-    </form>
+      </form>
+    </>
+  );
+}
+
+function InvestigatorOverview({ editor }: { editor: EditorState }): ReactElement {
+  const { profile } = editor;
+  const maxHp = maximumHitPoints(profile.characteristics);
+  const maxMp = Math.floor(profile.characteristics.power / 5);
+  const sanityCap = Math.max(0, 99 - editor.mythos);
+  const assets = profile.assets?.split(/\n|、|,/).map((value) => value.trim()).filter(Boolean) ?? [];
+  return (
+    <section className="investigator-overview" aria-label="调查员摘要">
+      <div className="overview-identity">
+        <span className="eyebrow">CURRENT INVESTIGATOR</span>
+        <h3>{profile.name.trim() || "未命名调查员"}</h3>
+        <p>{profile.occupation.trim() || "尚未填写职业"}{profile.player_name ? ` · ${profile.player_name}` : ""}</p>
+        <div className="overview-tags">
+          <span>信用评级 {profile.credit_rating}</span>
+          <span>移动力 {profile.move_rate}</span>
+          <span>伤害加值 {profile.damage_bonus || "0"}</span>
+        </div>
+      </div>
+      <div className="overview-vitals">
+        <OverviewVital label="生命 HP" value={editor.hit_points} max={maxHp} />
+        <OverviewVital label="魔法 MP" value={editor.magic_points} max={maxMp} />
+        <OverviewVital label="理智 SAN" value={editor.sanity} max={sanityCap} />
+        <OverviewVital label="幸运 Luck" value={profile.luck} max={100} />
+      </div>
+      <div className="overview-assets">
+        <strong>装备与资产</strong>
+        <p>{assets.length ? assets.join(" · ") : "尚未记录装备或资产"}</p>
+        <small>克苏鲁神话 {editor.mythos} · 体格 {profile.build} · {profile.spending_level || "消费水平未设定"}</small>
+      </div>
+      {editor.conditions.length ? (
+        <div className="overview-conditions" aria-label="当前状态">
+          {editor.conditions.map((condition) => <span key={condition}>{CONDITION_LABELS[condition]}</span>)}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function OverviewVital({ label, value, max }: { label: string; value: number; max: number }): ReactElement {
+  const safeMax = Math.max(1, max);
+  const percent = Math.max(0, Math.min(100, (value / safeMax) * 100));
+  return (
+    <div className="overview-vital" title={`${label}：${value} / ${max}`}>
+      <div><span>{label}</span><strong>{value}<small> / {max}</small></strong></div>
+      <div className="overview-meter"><i style={{ width: `${percent}%` }} /></div>
+    </div>
   );
 }
 
