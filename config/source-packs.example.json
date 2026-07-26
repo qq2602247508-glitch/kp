@@ -1,0 +1,454 @@
+{
+  "catalog_version": 1,
+  "ruleset": "coc7e",
+  "import_policy": {
+    "copy_source_text_into_catalog": false,
+    "execute_office_macros": false,
+    "xlsm_macro_handling": "never_execute",
+    "external_links": "never_follow",
+    "require_sha256_after_import": true,
+    "require_relative_pack_paths_after_import": true
+  },
+  "packs": [
+    {
+      "manifest": {
+        "pack_id": "coc7e.core.zh-v1.2.1",
+        "title": "COC7th 核心规则书",
+        "version": "1.2.1",
+        "edition": "7e",
+        "kind": "core",
+        "status": "registered",
+        "priority": 10,
+        "default_enabled": true,
+        "eras": [],
+        "files": [],
+        "notes": "默认规则裁决的最高优先级来源。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/KOXX4TR6LWRQQ.info/COC7th核心规则书v1.2.1.pdf",
+        "format": "pdf",
+        "page_count": 380,
+        "text_extraction": "direct",
+        "contains_macros": false
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.investigator-handbook.zh-v1.21",
+        "title": "克苏鲁的呼唤第七版调查员手册",
+        "version": "1.21",
+        "edition": "7e",
+        "kind": "investigator",
+        "status": "registered",
+        "priority": 20,
+        "default_enabled": true,
+        "eras": [],
+        "files": [],
+        "notes": "调查员创建与玩家侧补充；冲突时服从核心规则书。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/KOXX607VVGQ2W.info/克苏鲁的呼唤第七版调查员手册1.21.pdf",
+        "format": "pdf",
+        "page_count": 162,
+        "text_extraction": "direct",
+        "contains_macros": false
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.quickstart.zh-db-noart",
+        "title": "COC 7th 快速开始规则（DB 无插图修正版）",
+        "version": "db-noart",
+        "edition": "7e",
+        "kind": "quickstart",
+        "status": "registered",
+        "priority": 30,
+        "default_enabled": false,
+        "eras": [],
+        "files": [],
+        "notes": "教学和快速规则来源；默认关闭以避免与完整核心规则重复。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/LM3ERA696SD70.info/COC 7th 快速开始规则 (DB无插图修正版).docx",
+        "format": "docx",
+        "page_count": null,
+        "text_extraction": "ooxml",
+        "contains_macros": false
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.keeper-deck.weapons.zh",
+        "title": "克苏鲁的呼唤守秘人卡组：武器卡",
+        "version": "local",
+        "edition": "7e",
+        "kind": "card_deck",
+        "status": "registered",
+        "priority": 40,
+        "default_enabled": false,
+        "eras": [],
+        "files": [],
+        "notes": "武器速查扩展；不得覆盖核心规则。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/KOXX607VDC8Q9.info/克苏鲁的呼唤守秘人卡组：武器卡.pdf",
+        "format": "pdf",
+        "page_count": 13,
+        "text_extraction": "direct",
+        "contains_macros": false
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.keeper-deck.phobias.zh",
+        "title": "克苏鲁的呼唤守秘人卡组：恐惧症卡",
+        "version": "local",
+        "edition": "7e",
+        "kind": "card_deck",
+        "status": "registered",
+        "priority": 40,
+        "default_enabled": false,
+        "eras": [],
+        "files": [],
+        "notes": "恐惧症候选卡组；不得覆盖核心疯狂规则。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/KOXX607V4ZAXE.info/克苏鲁的呼唤守秘人卡组：恐惧症卡.pdf",
+        "format": "pdf",
+        "page_count": 13,
+        "text_extraction": "direct",
+        "contains_macros": false
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.keeper-deck.bystanders.zh",
+        "title": "克苏鲁的呼唤守秘人卡组：好事者卡",
+        "version": "local",
+        "edition": "7e",
+        "kind": "card_deck",
+        "status": "registered",
+        "priority": 50,
+        "default_enabled": false,
+        "eras": [],
+        "files": [],
+        "notes": "可选卡组扩展。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/KOXX607VDNGO0.info/克苏鲁的呼唤守秘人卡组：好事者卡.pdf",
+        "format": "pdf",
+        "page_count": 13,
+        "text_extraction": "direct",
+        "contains_macros": false
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.keeper-deck.misfortunes.zh",
+        "title": "克苏鲁的呼唤守秘人卡组：惨事卡",
+        "version": "local",
+        "edition": "7e",
+        "kind": "card_deck",
+        "status": "registered",
+        "priority": 50,
+        "default_enabled": false,
+        "eras": [],
+        "files": [],
+        "notes": "可选卡组扩展。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/KOXX607VFJUQ6.info/克苏鲁的呼唤守秘人卡组：惨事卡.pdf",
+        "format": "pdf",
+        "page_count": 13,
+        "text_extraction": "direct",
+        "contains_macros": false
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.character-sheet.cy21.1-lite",
+        "title": "COC 七版规则空白卡 CY21.1 精简",
+        "version": "CY21.1-lite",
+        "edition": "7e",
+        "kind": "investigator",
+        "status": "registered",
+        "priority": 60,
+        "default_enabled": false,
+        "eras": [],
+        "files": [],
+        "notes": "角色卡字段和布局参考，不作为规则裁决来源。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/KXKXB95SMAH11.info/COC七版规则空白卡CY21.1 - 精简.xlsx",
+        "format": "xlsx",
+        "page_count": null,
+        "text_extraction": "ooxml",
+        "contains_macros": false
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.character-sheet.cy22-plus-preview",
+        "title": "COC7 空白卡 CY22 Plus Preview",
+        "version": "CY22-plus-preview",
+        "edition": "7e",
+        "kind": "investigator",
+        "status": "registered",
+        "priority": 60,
+        "default_enabled": false,
+        "eras": [],
+        "files": [],
+        "notes": "增强角色卡字段和布局参考，不作为规则裁决来源。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/KXKXBMRKQRSEV.info/COC7空白卡CY22PlusPreview.xlsx",
+        "format": "xlsx",
+        "page_count": null,
+        "text_extraction": "ooxml",
+        "contains_macros": false
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.magic-compendium.zh-v1.1",
+        "title": "克苏鲁神话魔法大典",
+        "version": "1.1",
+        "edition": "7e-supplement",
+        "kind": "magic",
+        "status": "registered",
+        "priority": 70,
+        "default_enabled": false,
+        "eras": [],
+        "files": [],
+        "notes": "魔法扩展，必须按战役显式启用。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/LM3F4274XYQ40.info/克苏鲁神话魔法大典1.1.pdf",
+        "format": "pdf",
+        "page_count": 158,
+        "text_extraction": "direct",
+        "contains_macros": false
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.time-travel.volume-6.zh",
+        "title": "克苏鲁时空穿梭 6",
+        "version": "6",
+        "edition": "7e-supplement",
+        "kind": "era",
+        "status": "registered",
+        "priority": 80,
+        "default_enabled": false,
+        "eras": ["time-travel"],
+        "files": [],
+        "notes": "跨时代扩展，必须按战役显式启用。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/LM3F8HKQD2QFB.info/克苏鲁时空穿梭6.pdf",
+        "format": "pdf",
+        "page_count": 52,
+        "text_extraction": "direct",
+        "contains_macros": false
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.dreamlands.zh",
+        "title": "幻梦之书",
+        "version": "local",
+        "edition": "7e-supplement",
+        "kind": "setting",
+        "status": "registered",
+        "priority": 80,
+        "default_enabled": false,
+        "eras": ["dreamlands"],
+        "files": [],
+        "notes": "幻梦境扩展；源 PDF 有打印权限限制，导入时不得规避权限。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/LM3F8HKQ46TNE.info/幻梦之书.pdf",
+        "format": "pdf",
+        "page_count": 165,
+        "text_extraction": "direct",
+        "contains_macros": false
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.time-travel.sheet.future-v1.5",
+        "title": "克苏鲁时空穿梭角色卡：未来",
+        "version": "1.5",
+        "edition": "7e-supplement",
+        "kind": "era",
+        "status": "registered",
+        "priority": 90,
+        "default_enabled": false,
+        "eras": ["future"],
+        "files": [],
+        "notes": "时代角色卡模板；只读 OOXML，禁止执行宏。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/LM3F4KF4V0ADO.info/克苏鲁时空穿梭角色卡1.5（未来）.xlsm",
+        "format": "xlsm",
+        "page_count": null,
+        "text_extraction": "ooxml-without-vba",
+        "contains_macros": true
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.time-travel.sheet.apocalypse-v1.5",
+        "title": "克苏鲁时空穿梭角色卡：末日",
+        "version": "1.5",
+        "edition": "7e-supplement",
+        "kind": "era",
+        "status": "registered",
+        "priority": 90,
+        "default_enabled": false,
+        "eras": ["apocalypse"],
+        "files": [],
+        "notes": "时代角色卡模板；只读 OOXML，禁止执行宏。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/LM3F4KF4K4KUP.info/克苏鲁时空穿梭角色卡1.5（末日）.xlsm",
+        "format": "xlsm",
+        "page_count": null,
+        "text_extraction": "ooxml-without-vba",
+        "contains_macros": true
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.time-travel.sheet.gaslight-v1.5",
+        "title": "克苏鲁时空穿梭角色卡：煤气灯",
+        "version": "1.5",
+        "edition": "7e-supplement",
+        "kind": "era",
+        "status": "registered",
+        "priority": 90,
+        "default_enabled": false,
+        "eras": ["gaslight"],
+        "files": [],
+        "notes": "时代角色卡模板；只读 OOXML，禁止执行宏。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/LM3F4KF4JBH6D.info/克苏鲁时空穿梭角色卡1.5（煤气灯）.xlsm",
+        "format": "xlsm",
+        "page_count": null,
+        "text_extraction": "ooxml-without-vba",
+        "contains_macros": true
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.time-travel.sheet.roman-v1.5",
+        "title": "克苏鲁时空穿梭角色卡：罗马",
+        "version": "1.5",
+        "edition": "7e-supplement",
+        "kind": "era",
+        "status": "registered",
+        "priority": 90,
+        "default_enabled": false,
+        "eras": ["roman"],
+        "files": [],
+        "notes": "时代角色卡模板；只读 OOXML，禁止执行宏。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/LM3F4KF4OJAS2.info/克苏鲁时空穿梭角色卡1.5（罗马）.xlsm",
+        "format": "xlsm",
+        "page_count": null,
+        "text_extraction": "ooxml-without-vba",
+        "contains_macros": true
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.time-travel.sheet.dreamlands-v1.5",
+        "title": "克苏鲁时空穿梭角色卡：幻梦境",
+        "version": "1.5",
+        "edition": "7e-supplement",
+        "kind": "era",
+        "status": "registered",
+        "priority": 90,
+        "default_enabled": false,
+        "eras": ["dreamlands"],
+        "files": [],
+        "notes": "时代角色卡模板；只读 OOXML，禁止执行宏。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/LM3F4KF4DZ388.info/克苏鲁时空穿梭角色卡1.5（幻梦境）.xlsm",
+        "format": "xlsm",
+        "page_count": null,
+        "text_extraction": "ooxml-without-vba",
+        "contains_macros": true
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.time-travel.sheet.dark-ages-v1.5",
+        "title": "克苏鲁时空穿梭角色卡：黑暗时代",
+        "version": "1.5",
+        "edition": "7e-supplement",
+        "kind": "era",
+        "status": "registered",
+        "priority": 90,
+        "default_enabled": false,
+        "eras": ["dark-ages"],
+        "files": [],
+        "notes": "时代角色卡模板；只读 OOXML，禁止执行宏。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/LM3F4KF442YYZ.info/克苏鲁时空穿梭角色卡1.5（黑暗时代）.xlsm",
+        "format": "xlsm",
+        "page_count": null,
+        "text_extraction": "ooxml-without-vba",
+        "contains_macros": true
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc7e.time-travel.sheet.iceland-v1.5",
+        "title": "克苏鲁时空穿梭角色卡：冰岛",
+        "version": "1.5",
+        "edition": "7e-supplement",
+        "kind": "era",
+        "status": "registered",
+        "priority": 90,
+        "default_enabled": false,
+        "eras": ["iceland"],
+        "files": [],
+        "notes": "时代角色卡模板；只读 OOXML，禁止执行宏。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/LM3F4KF419HVS.info/克苏鲁时空穿梭角色卡1.5（冰岛）.xlsm",
+        "format": "xlsm",
+        "page_count": null,
+        "text_extraction": "ooxml-without-vba",
+        "contains_macros": true
+      }
+    },
+    {
+      "manifest": {
+        "pack_id": "coc-classic.40th-anniversary.zh-build2306",
+        "title": "克苏鲁的呼唤 40 周年纪念版",
+        "version": "Build2306",
+        "edition": "classic-40th",
+        "kind": "legacy",
+        "status": "registered",
+        "priority": 900,
+        "default_enabled": false,
+        "eras": [],
+        "files": [],
+        "notes": "旧版/纪念版隔离资料；不得进入默认 COC7 检索或覆盖七版规则。"
+      },
+      "source": {
+        "original_absolute_path": "/Volumes/personal_folder/100-eagle/新nas.library/images/LM3DB4UWWQS01.info/克苏鲁的呼唤40周年纪念版Build2306.pdf",
+        "format": "pdf",
+        "page_count": 470,
+        "text_extraction": "direct",
+        "contains_macros": false
+      }
+    }
+  ]
+}

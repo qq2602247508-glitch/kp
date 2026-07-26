@@ -1,0 +1,140 @@
+import type {
+  Campaign,
+  CampaignCreate,
+  Investigator,
+  InvestigatorCondition,
+  InvestigatorProfile,
+  InvestigatorUpdate,
+  RollRequest,
+  RollResult,
+} from "./types";
+
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "/api/v1").replace(/\/$/, "");
+
+type InvestigatorWire = InvestigatorProfile & {
+  investigator_id: string;
+  campaign_id: string;
+  hit_points: number;
+  magic_points: number;
+  sanity: number;
+  mythos: number;
+  conditions: InvestigatorCondition[];
+  version: number;
+};
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...init?.headers,
+    },
+  });
+
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`.trim();
+    try {
+      const body = (await response.json()) as { detail?: string };
+      detail = body.detail ?? detail;
+    } catch {
+      // The status text remains the most useful available message.
+    }
+    throw new ApiError(detail, response.status);
+  }
+
+  return (await response.json()) as T;
+}
+
+export function listCampaigns(signal?: AbortSignal): Promise<Campaign[]> {
+  return request<Campaign[]>("/campaigns", { signal });
+}
+
+export function createCampaign(payload: CampaignCreate): Promise<Campaign> {
+  return request<Campaign>("/campaigns", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listInvestigators(
+  campaignId: string,
+  signal?: AbortSignal,
+): Promise<Investigator[]> {
+  return request<Array<InvestigatorWire | Investigator>>(
+    `/campaigns/${campaignId}/investigators`,
+    { signal },
+  ).then((items) => items.map(normalizeInvestigator));
+}
+
+export function createInvestigator(
+  campaignId: string,
+  payload: InvestigatorProfile,
+): Promise<Investigator> {
+  return request<InvestigatorWire | Investigator>(
+    `/campaigns/${campaignId}/investigators`,
+    {
+    method: "POST",
+    body: JSON.stringify(payload),
+    },
+  ).then(normalizeInvestigator);
+}
+
+export function updateInvestigator(
+  campaignId: string,
+  investigatorId: string,
+  payload: InvestigatorUpdate,
+): Promise<Investigator> {
+  return request<InvestigatorWire | Investigator>(
+    `/campaigns/${campaignId}/investigators/${investigatorId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    },
+  ).then(normalizeInvestigator);
+}
+
+export function resolveRoll(payload: RollRequest): Promise<RollResult> {
+  return request<RollResult>("/rolls", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+function normalizeInvestigator(value: InvestigatorWire | Investigator): Investigator {
+  if ("profile" in value) {
+    return value;
+  }
+  const {
+    investigator_id,
+    campaign_id,
+    hit_points,
+    magic_points,
+    sanity,
+    mythos,
+    conditions,
+    version,
+    ...profile
+  } = value;
+  return {
+    investigator_id,
+    campaign_id,
+    hit_points,
+    magic_points,
+    sanity,
+    mythos,
+    conditions,
+    version,
+    profile,
+  };
+}
