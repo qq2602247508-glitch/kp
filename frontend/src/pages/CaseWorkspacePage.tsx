@@ -166,6 +166,7 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
       setEntryCache(emptyCache());
       return;
     }
+    setEntryCache(emptyCache());
     const controller = new AbortController();
     Promise.all(
       KINDS.map(async ({ kind: requestedKind }) => [
