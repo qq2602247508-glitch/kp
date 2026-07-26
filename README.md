@@ -53,6 +53,21 @@ KP：规则检索、调查员与人物管理、地点与线索编排、理智状
 打开 `http://127.0.0.1:5180/`。前端 API 默认指向
 `http://127.0.0.1:8010/api/v1`。
 
+## 本地资料导入
+
+先用只读 dry run 验证登记来源；它只向标准输出写入机器可读 JSON，不创建产物：
+
+```bash
+backend/.venv/bin/python -m coc_kp_assistant.ingestion \
+  --catalog config/source-packs.example.json \
+  --output-root data/generated-content/coc7 \
+  --dry-run
+```
+
+移除 `--dry-run` 后才会把确定性的 JSON、Markdown 和导入报告写入
+`data/generated-content/coc7`（该目录不入 Git）。PDF 必须已有文字层；DOCX、XLSX
+和 XLSM 仅以 OOXML/ZIP 方式读取，绝不执行宏、公式或外部链接。
+
 ## 检查
 
 ```bash
@@ -72,4 +87,3 @@ scripts/       独立开发、设置与质量检查
 data/          本地数据库、资料处理产物和向量索引（不入 Git）
 docs/          架构、资料策略与领域说明
 ```
-
