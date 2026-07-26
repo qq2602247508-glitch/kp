@@ -5,11 +5,13 @@ import {
   decideAIProposal,
   listAIProposals,
   listCampaigns,
+  listCaseEntries,
 } from "../api/client";
 import type {
   AIKPResponse,
   AIProposal,
   Campaign,
+  CaseEntry,
 } from "../api/types";
 import {
   chooseAvailableCampaign,
@@ -33,6 +35,7 @@ export function AIKPPage({
   const [rejectionReason, setRejectionReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [currentScene, setCurrentScene] = useState<CaseEntry | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -66,8 +69,14 @@ export function AIKPPage({
       return;
     }
     const controller = new AbortController();
-    listAIProposals(campaignId, controller.signal)
-      .then(setProposals)
+    Promise.all([
+      listAIProposals(campaignId, controller.signal),
+      listCaseEntries(campaignId, "scenes", controller.signal),
+    ])
+      .then(([items, scenes]) => {
+        setProposals(items);
+        setCurrentScene(scenes.find((scene) => scene.status === "current") ?? null);
+      })
       .catch(() => undefined);
     return () => controller.abort();
   }, [campaignId, initialView]);
@@ -153,6 +162,17 @@ export function AIKPPage({
 
       {initialView === "assistant" ? (
         <section className="ai-kp-console">
+          <article className="ai-current-scene">
+            <span className="eyebrow">CURRENT SCENE CONTEXT</span>
+            <strong>{currentScene?.title ?? "尚未在推进台指定当前场景"}</strong>
+            <p>{currentScene?.player_visible_text || "指定当前场景后，副驾驶会连同调查员、人物、线索和时间线一起读取。"}</p>
+            {currentScene ? (
+              <div className="proposal-actions">
+                <button className="secondary-button" onClick={() => setQuestion(`根据当前场景“${currentScene.title}”和最近时间线，给我三个符合 COC7 的下一步推进选项，并指出可能触发的技能或 SAN 检定。`)} type="button">生成推进选项</button>
+                <button className="secondary-button" onClick={() => setQuestion(`判断当前场景“${currentScene.title}”是否已经满足转场条件；若满足，请建议下一场景，但不要直接修改案件状态。`)} type="button">判断是否转场</button>
+              </div>
+            ) : null}
+          </article>
           <label>
             工作模式
             <select

@@ -405,6 +405,33 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
     }
   }
 
+  async function recordSceneProgress(): Promise<void> {
+    if (!activeScene || !sceneHint.trim()) return;
+    setBusy(true);
+    try {
+      const created = await createCaseEntry(campaignId, "timeline-events", {
+        title: `${activeScene.title} · 推进记录`,
+        player_visible_text: sceneHint.trim(),
+        keeper_truth: "",
+        status: "recorded",
+        session_id: activeScene.session_id,
+        scene_id: activeScene.entity_id,
+        time_label: new Date().toLocaleString(),
+        sort_order: entryCache["timeline-events"].length,
+      });
+      setEntryCache((cache) => ({
+        ...cache,
+        "timeline-events": [...cache["timeline-events"], created],
+      }));
+      setSceneHint("");
+      setMessage("推进内容已写入案件时间线，可供 AI KP 读取。 ");
+    } catch (error: unknown) {
+      setMessage(errorMessage(error, "推进记录保存失败。"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="case-workspace">
       <section className="case-workspace-header">
@@ -513,6 +540,7 @@ export function CaseWorkspacePage({ initialKind }: Props): ReactElement {
                 KP 推进记录 / AI 建议
                 <textarea rows={3} value={sceneHint} onChange={(event) => setSceneHint(event.target.value)} placeholder="记录玩家行为，或粘贴 AI 提示后再决定是否转场。" />
               </label>
+              <button disabled={busy || !sceneHint.trim() || !activeScene} onClick={() => void recordSceneProgress()} type="button">写入时间线</button>
               <small>KP 真相仅在编辑器和 AI KP 私密上下文中可见，不会进入玩家投影。</small>
             </div>
           </div>
