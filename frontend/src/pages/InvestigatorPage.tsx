@@ -89,6 +89,34 @@ const COMMON_SKILLS: SkillEntry[] = [
   skill("stealth", "潜行", 20),
 ];
 
+const OCCUPATION_PRESETS = [
+  "古董商",
+  "艺术家",
+  "运动员",
+  "作家",
+  "神职人员",
+  "罪犯",
+  "私家侦探",
+  "医生",
+  "流浪者",
+  "工程师",
+  "艺人",
+  "农民",
+  "记者",
+  "律师",
+  "图书管理员",
+  "军官",
+  "传教士",
+  "音乐家",
+  "护士",
+  "警探",
+  "警察",
+  "教授",
+  "士兵",
+  "部落成员",
+  "狂热者",
+] as const;
+
 /** Short, COC7-native reminders shown on hover; the rule engine remains authoritative. */
 const SKILL_DESCRIPTIONS: Record<string, string> = {
   accounting: "评估财务状况、追查账目或发现资金异常。通常进行 INT/5 或技能百分骰。",
@@ -246,6 +274,7 @@ export function InvestigatorPage(): ReactElement {
   const [growthSkillKey, setGrowthSkillKey] = useState("");
   const [growthRoll, setGrowthRoll] = useState(100);
   const [growthIncrease, setGrowthIncrease] = useState(1);
+  const [view, setView] = useState<"list" | "editor">("list");
 
   const loadCampaigns = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -289,6 +318,7 @@ export function InvestigatorPage(): ReactElement {
     if (!campaignId) {
       setInvestigators([]);
       setEditor(createEditor());
+      setView("list");
       return;
     }
     const controller = new AbortController();
@@ -297,11 +327,10 @@ export function InvestigatorPage(): ReactElement {
       .then((result) => {
         setInvestigators(result);
         setEditor((current) => {
-          const selected = result.find(
-            (item) => item.investigator_id === current.investigator_id,
-          );
-          return selected ? createEditor(selected) : createEditor(result[0]);
+          const selected = result.find((item) => item.investigator_id === current.investigator_id);
+          return selected ? createEditor(selected) : createEditor();
         });
+        setView("list");
         setFailure(null);
       })
       .catch((error: unknown) => {
@@ -376,6 +405,7 @@ export function InvestigatorPage(): ReactElement {
         return items.map((item, itemIndex) => (itemIndex === index ? saved : item));
       });
       setEditor(createEditor(saved));
+      setView("editor");
       setNotice(editor.investigator_id ? "调查员已更新。" : "调查员已创建。");
     } catch (error) {
       setFailure(errorMessage(error));
@@ -476,32 +506,18 @@ export function InvestigatorPage(): ReactElement {
             </select>
           </label>
           <label>
-            调查员
-            <select
-              aria-label="当前调查员"
-              disabled={!campaignId}
-              onChange={(event) => {
-                const selected = investigators.find(
-                  (item) => item.investigator_id === event.target.value,
-                );
-                setEditor(createEditor(selected));
-              }}
-              value={editor.investigator_id ?? ""}
-            >
-              <option value="">新建调查员</option>
-              {investigators.map((investigator) => (
-                <option
-                  key={investigator.investigator_id}
-                  value={investigator.investigator_id}
-                >
-                  {investigator.profile.name}
-                </option>
-              ))}
-            </select>
+            当前界面
+            <span className="toolbar-view-label">{view === "list" ? "调查员列表" : editor.investigator_id ? "调查员详情" : "创建调查员"}</span>
           </label>
-          <button className="secondary-button" onClick={() => setEditor(createEditor())}>
-            新建角色卡
-          </button>
+          {view === "editor" ? (
+            <button className="secondary-button" onClick={() => setView("list")} type="button">
+              返回列表
+            </button>
+          ) : (
+            <button onClick={() => { setEditor(createEditor()); setView("editor"); }} type="button">
+              创建调查员
+            </button>
+          )}
         </div>
       </section>
 
@@ -526,20 +542,62 @@ export function InvestigatorPage(): ReactElement {
       {failure ? <div className="message error-message">{failure}</div> : null}
       {notice ? <div className="message success-message">{notice}</div> : null}
 
-      {campaignId ? (
+      {campaignId && view === "list" ? (
+        <section className="investigator-directory" aria-label="调查员列表">
+          <header>
+            <div>
+              <p className="eyebrow">INVESTIGATOR ROSTER</p>
+              <h3>调查员列表</h3>
+              <p>外层只展示跑团时常用状态；点击卡片进入完整角色卡。</p>
+            </div>
+            <button onClick={() => { setEditor(createEditor()); setView("editor"); }} type="button">＋ 创建调查员</button>
+          </header>
+          {investigators.length === 0 ? (
+            <div className="investigator-directory-empty">
+              <strong>当前调查还没有调查员</strong>
+              <span>点击“创建调查员”进入独立的完整车卡界面。</span>
+            </div>
+          ) : (
+            <div className="investigator-card-grid">
+              {investigators.map((investigator) => (
+                <button
+                  className="investigator-directory-card"
+                  key={investigator.investigator_id}
+                  onClick={() => { setEditor(createEditor(investigator)); setView("editor"); }}
+                  type="button"
+                >
+                  <span>
+                    <strong>{investigator.profile.name}</strong>
+                    <small>{investigator.profile.occupation} · {investigator.profile.player_name || "未填写玩家"}</small>
+                  </span>
+                  <span className="directory-stats">
+                    <b>HP {investigator.hit_points}/{maximumHitPoints(investigator.profile.characteristics)}</b>
+                    <b>SAN {investigator.sanity}</b>
+                    <b>MP {investigator.magic_points}</b>
+                    <b>MOV {investigator.profile.move_rate}</b>
+                  </span>
+                  <small>{investigator.conditions.length ? investigator.conditions.map((item) => CONDITION_LABELS[item]).join(" · ") : "状态正常"}</small>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {campaignId && view === "editor" ? (
         <>
-          <div className="sheet-and-roll">
+          <div className={`sheet-and-roll ${editor.investigator_id ? "" : "creation-mode"}`}>
             <InvestigatorSheet
               editor={editor}
               onCharacteristicChange={patchCharacteristic}
               onEditorChange={setEditor}
               onProfileChange={patchProfile}
             />
-            <RollPanel
+            {editor.investigator_id ? <RollPanel
               campaignId={campaignId}
               investigator={editor}
               investigationTitle={selectedCampaign?.title ?? "当前调查"}
-            />
+            /> : null}
           </div>
           {editor.investigator_id ? <section className="development-panel" aria-label="幕间成长">
             <div>
@@ -622,11 +680,19 @@ function InvestigatorSheet({
             />
           </Field>
           <Field label="职业">
-            <input
+            <select
               aria-label="职业"
               onChange={(event) => onProfileChange({ occupation: event.target.value })}
               value={profile.occupation}
-            />
+            >
+              <option value="">请选择 COC7 职业</option>
+              {profile.occupation && !OCCUPATION_PRESETS.includes(profile.occupation as typeof OCCUPATION_PRESETS[number]) ? (
+                <option value={profile.occupation}>{profile.occupation}</option>
+              ) : null}
+              {OCCUPATION_PRESETS.map((occupation) => (
+                <option key={occupation} value={occupation}>{occupation}</option>
+              ))}
+            </select>
           </Field>
           <Field label="年龄">
             <NumberInput

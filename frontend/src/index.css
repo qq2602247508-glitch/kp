@@ -933,6 +933,28 @@ h1 {
   font-size: 11px;
 }
 
+.chase-readiness {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 12px 0;
+}
+
+.chase-readiness span {
+  padding: 5px 8px;
+  border: 1px solid #493d35;
+  border-radius: 999px;
+  color: #a08e80;
+  background: #1c1714;
+  font-size: 10px;
+}
+
+.chase-readiness span.ready {
+  border-color: #405d49;
+  color: #a9c0ad;
+  background: #132019;
+}
+
 .citation-card small,
 .chase-track small,
 .operation-list small {
@@ -1020,6 +1042,18 @@ h1 {
   gap: 5px;
   color: #7d8a82;
   font-size: 10px;
+}
+
+.toolbar-view-label {
+  display: grid;
+  min-width: 112px;
+  min-height: 35px;
+  place-items: center start;
+  padding: 6px 9px;
+  border: 1px solid #35443b;
+  border-radius: 4px;
+  color: #c9cec5;
+  background: #0b1210;
 }
 
 input,
@@ -1145,6 +1179,115 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr) 310px;
   gap: 16px;
   align-items: start;
+}
+
+.sheet-and-roll.creation-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.investigator-directory {
+  display: grid;
+  gap: 18px;
+  min-height: 440px;
+  padding: 24px;
+  border: 1px solid #33423a;
+  border-radius: 8px;
+  background: rgba(13, 20, 17, 0.9);
+}
+
+.investigator-directory > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.investigator-directory h3,
+.investigator-directory p {
+  margin: 0;
+}
+
+.investigator-directory h3 {
+  margin: 4px 0 6px;
+  color: #e7e2d4;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 24px;
+  font-weight: 400;
+}
+
+.investigator-directory header p:last-child,
+.investigator-directory-empty span {
+  color: #7d8a82;
+  font-size: 12px;
+}
+
+.investigator-directory header button {
+  min-height: 38px;
+  padding: 8px 14px;
+}
+
+.investigator-directory-empty {
+  display: grid;
+  min-height: 300px;
+  place-content: center;
+  gap: 8px;
+  border: 1px dashed #3b4a40;
+  border-radius: 7px;
+  color: #d3d4c8;
+  text-align: center;
+}
+
+.investigator-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+
+.investigator-directory-card {
+  display: grid;
+  gap: 13px;
+  min-height: 160px;
+  padding: 17px;
+  border-color: #3a4a40;
+  color: #d9dbd0;
+  background: #101815;
+  text-align: left;
+}
+
+.investigator-directory-card:hover {
+  border-color: #718674;
+  background: #15221c;
+}
+
+.investigator-directory-card strong,
+.investigator-directory-card small {
+  display: block;
+}
+
+.investigator-directory-card strong {
+  margin-bottom: 4px;
+  font-family: Georgia, "Songti SC", serif;
+  font-size: 19px;
+}
+
+.investigator-directory-card small {
+  color: #849188;
+}
+
+.directory-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.directory-stats b {
+  padding: 7px 5px;
+  border: 1px solid #34443a;
+  border-radius: 4px;
+  color: #b9c5b9;
+  font-size: 11px;
+  text-align: center;
 }
 
 .investigator-overview {

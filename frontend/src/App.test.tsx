@@ -100,7 +100,8 @@ describe("COC KP application shell", () => {
     expect(
       await screen.findByRole("heading", { name: "COC7 调查员角色卡" }),
     ).toBeInTheDocument();
-    expect(await screen.findByLabelText("当前调查员")).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "调查员列表" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建调查员" })).toBeInTheDocument();
   });
 
   it("opens the grounded COC7 rules workspace", () => {

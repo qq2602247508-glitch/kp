@@ -44,6 +44,8 @@ export function CombatChasePage(): ReactElement {
   const [investigators, setInvestigators] = useState<Investigator[]>([]);
   const [attackerId, setAttackerId] = useState("");
   const [targetId, setTargetId] = useState("");
+  const [pursuerId, setPursuerId] = useState("");
+  const [fleeingId, setFleeingId] = useState("");
   const [sessions, setSessions] = useState<CaseEntry[]>([]);
   const [caseSessionId, setCaseSessionId] = useState("");
   const [weapons, setWeapons] = useState<WeaponPolicy[]>([]);
@@ -79,6 +81,14 @@ export function CombatChasePage(): ReactElement {
   const target = useMemo(
     () => investigators.find((item) => item.investigator_id === targetId),
     [targetId, investigators],
+  );
+  const pursuer = useMemo(
+    () => investigators.find((item) => item.investigator_id === pursuerId),
+    [investigators, pursuerId],
+  );
+  const fleeing = useMemo(
+    () => investigators.find((item) => item.investigator_id === fleeingId),
+    [fleeingId, investigators],
   );
   const activeCombatantId = combatActive ? turnOrderIds[turnIndex] : undefined;
   const activeCombatant = investigators.find(
@@ -153,6 +163,8 @@ export function CombatChasePage(): ReactElement {
         setCombatParticipantIds(people.map((item) => item.investigator_id));
         setAttackerId((current) => people.some((item) => item.investigator_id === current) ? current : people[0]?.investigator_id || "");
         setTargetId((current) => people.some((item) => item.investigator_id === current) ? current : people[1]?.investigator_id || "");
+        setPursuerId((current) => people.some((item) => item.investigator_id === current) ? current : people[0]?.investigator_id || "");
+        setFleeingId((current) => people.some((item) => item.investigator_id === current) ? current : people[1]?.investigator_id || "");
         setChases(chaseItems);
         setChaseId((current) => chaseItems.some((item) => item.chase_id === current) ? current : chaseItems[0]?.chase_id || "");
         setLogs(operationItems);
@@ -317,6 +329,8 @@ export function CombatChasePage(): ReactElement {
     selectCampaign(nextCampaignId);
     setAttackerId("");
     setTargetId("");
+    setPursuerId("");
+    setFleeingId("");
     setCaseSessionId("");
     setChases([]);
     setChaseId("");
@@ -328,8 +342,12 @@ export function CombatChasePage(): ReactElement {
       setFailure("建立追逐必须选择案件场次。");
       return;
     }
-    if (!attacker || !target || attacker.investigator_id === target.investigator_id) {
-      setFailure("建立追逐需要两名不同的参与者。");
+    if (investigators.length < 2) {
+      setFailure("当前案件至少需要两名调查员才能建立追逐；请先在调查员界面创建第二名参与者。");
+      return;
+    }
+    if (!pursuer || !fleeing || pursuer.investigator_id === fleeing.investigator_id) {
+      setFailure("请选择两名不同的追逐参与者，并分别指定追逐者与逃亡者。");
       return;
     }
     setBusy(true);
@@ -338,8 +356,8 @@ export function CombatChasePage(): ReactElement {
         title: "现场追逐",
         case_session_id: caseSessionId,
         participants: [
-          { investigator_id: attacker.investigator_id, role: "pursuer", position: pursuerPosition },
-          { investigator_id: target.investigator_id, role: "fleeing", position: fleeingPosition },
+          { investigator_id: pursuer.investigator_id, role: "pursuer", position: pursuerPosition },
+          { investigator_id: fleeing.investigator_id, role: "fleeing", position: fleeingPosition },
         ],
         escape_distance: escapeDistance,
         track_length: trackLength,
@@ -517,14 +535,34 @@ export function CombatChasePage(): ReactElement {
 
         <article className="engine-panel">
           <h3>追逐</h3>
+          <p className="section-help">追逐必须归属一个案件场次，并指定两名不同参与者。追逐者和逃亡者与左侧战斗目标相互独立。</p>
           <div className="engine-form-grid">
+            <label className="field">
+              <span>追逐者</span>
+              <select aria-label="追逐者" value={pursuerId} onChange={(event) => setPursuerId(event.target.value)}>
+                <option value="">请选择</option>
+                {investigators.map((item) => <option key={item.investigator_id} value={item.investigator_id}>{item.profile.name} · MOV {item.profile.move_rate}</option>)}
+              </select>
+            </label>
+            <label className="field">
+              <span>逃亡者</span>
+              <select aria-label="逃亡者" value={fleeingId} onChange={(event) => setFleeingId(event.target.value)}>
+                <option value="">请选择</option>
+                {investigators.map((item) => <option key={item.investigator_id} value={item.investigator_id}>{item.profile.name} · MOV {item.profile.move_rate}</option>)}
+              </select>
+            </label>
             <label className="field"><span>追者起点</span><input type="number" min="0" value={pursuerPosition} onChange={(event) => setPursuerPosition(Number(event.target.value))} /></label>
             <label className="field"><span>逃者起点</span><input type="number" min="0" value={fleeingPosition} onChange={(event) => setFleeingPosition(Number(event.target.value))} /></label>
             <label className="field"><span>逃脱距离</span><input type="number" min="1" value={escapeDistance} onChange={(event) => setEscapeDistance(Number(event.target.value))} /></label>
             <label className="field"><span>赛道长度</span><input type="number" min="1" value={trackLength} onChange={(event) => setTrackLength(Number(event.target.value))} /></label>
           </div>
+          <div className="chase-readiness" aria-label="追逐建立条件" role="region">
+            <span className={caseSessionId ? "ready" : ""}>{caseSessionId ? "✓" : "○"} 已选择案件场次</span>
+            <span className={investigators.length >= 2 ? "ready" : ""}>{investigators.length >= 2 ? "✓" : "○"} 至少两名调查员</span>
+            <span className={pursuer && fleeing && pursuerId !== fleeingId ? "ready" : ""}>{pursuer && fleeing && pursuerId !== fleeingId ? "✓" : "○"} 追逐双方不同</span>
+          </div>
           <div className="engine-actions">
-            <button disabled={busy || investigators.length < 2 || !caseSessionId} onClick={() => void handleCreateChase()} type="button">
+            <button disabled={busy} onClick={() => void handleCreateChase()} type="button">
               建立追逐
             </button>
           </div>

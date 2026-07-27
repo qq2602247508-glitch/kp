@@ -118,4 +118,14 @@ describe("engine session compatibility", () => {
     expect(body).toMatchObject({ case_session_id: "session-1", participants: [{ investigator_id: "inv-1", role: "pursuer", position: 1 }, { investigator_id: "inv-2", role: "fleeing", position: 4 }] });
     expect(screen.getByLabelText("行动者")).toHaveValue("inv-1");
   });
+
+  it("keeps chase creation actionable and explains missing prerequisites", async () => {
+    mockFetch(false);
+    render(<CombatChasePage />);
+    await waitFor(() => expect(screen.getByLabelText("追逐者")).toHaveValue("inv-1"));
+    expect(screen.getByRole("button", { name: "建立追逐" })).toBeEnabled();
+    expect(screen.getByRole("region", { name: "追逐建立条件" })).toHaveTextContent("○ 已选择案件场次");
+    fireEvent.click(screen.getByRole("button", { name: "建立追逐" }));
+    expect(await screen.findByText("建立追逐必须选择案件场次。")).toBeInTheDocument();
+  });
 });

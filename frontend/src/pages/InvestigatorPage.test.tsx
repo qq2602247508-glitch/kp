@@ -132,6 +132,8 @@ describe("InvestigatorPage", () => {
 
     render(<InvestigatorPage />);
 
+    expect(await screen.findByRole("region", { name: "调查员列表" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /林若岚/ }));
     await waitFor(() => expect(screen.getByLabelText("姓名")).toHaveValue("林若岚"));
     expect(screen.getByRole("region", { name: "调查员摘要" })).toHaveTextContent("生命 HP");
     expect(screen.getByRole("region", { name: "调查员摘要" })).toHaveTextContent("装备与资产");
@@ -169,6 +171,7 @@ describe("InvestigatorPage", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     render(<InvestigatorPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /林若岚/ }));
     await waitFor(() => expect(screen.getByLabelText("成长技能")).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("成长技能"), { target: { value: "spot_hidden" } });
     fireEvent.change(screen.getByLabelText("改善检定 D100"), { target: { value: "90" } });
@@ -179,5 +182,22 @@ describe("InvestigatorPage", () => {
     expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
       expected_version: 1, skill_key: "spot_hidden", improvement_roll: 90, increase_roll: 7,
     });
+  });
+
+  it("opens a dedicated creation view and offers occupation presets", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/campaigns")) return Promise.resolve(jsonResponse([{ campaign_id: "campaign-1", title: "雾中来客", ruleset: "coc7e", era: "1920s", enabled_source_pack_ids: [], house_rules: [], version: 1 }]));
+      if (url.endsWith("/campaigns/campaign-1/investigators")) return Promise.resolve(jsonResponse([]));
+      return Promise.resolve(jsonResponse({ detail: "unexpected request" }, 500));
+    }));
+
+    render(<InvestigatorPage />);
+    expect(await screen.findByText("当前调查还没有调查员")).toBeInTheDocument();
+    expect(screen.queryByLabelText("姓名")).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: /创建调查员/ })[0]);
+    expect(screen.getByLabelText("姓名")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "职业" })).toContainHTML("记者");
+    expect(screen.queryByText("快速检定")).not.toBeInTheDocument();
   });
 });
