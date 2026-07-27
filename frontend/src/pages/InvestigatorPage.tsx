@@ -586,7 +586,7 @@ export function InvestigatorPage(): ReactElement {
 
       {campaignId && view === "editor" ? (
         <>
-          <div className={`sheet-and-roll ${editor.investigator_id ? "" : "creation-mode"}`}>
+          <div className={`sheet-and-roll ${editor.investigator_id ? "detail-mode" : "creation-mode"}`}>
             <InvestigatorSheet
               editor={editor}
               onCharacteristicChange={patchCharacteristic}

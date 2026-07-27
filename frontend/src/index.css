@@ -1185,6 +1185,14 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.sheet-and-roll.detail-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.sheet-and-roll.detail-mode .roll-panel {
+  position: static;
+}
+
 .investigator-directory {
   display: grid;
   gap: 18px;

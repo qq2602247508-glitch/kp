@@ -135,6 +135,7 @@ describe("InvestigatorPage", () => {
     expect(await screen.findByRole("region", { name: "调查员列表" })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: /林若岚/ }));
     await waitFor(() => expect(screen.getByLabelText("姓名")).toHaveValue("林若岚"));
+    expect(document.querySelector(".sheet-and-roll.detail-mode")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "调查员摘要" })).toHaveTextContent("生命 HP");
     expect(screen.getByRole("region", { name: "调查员摘要" })).toHaveTextContent("装备与资产");
     expect(screen.getByTitle(/发现隐藏的门/)).toBeInTheDocument();
